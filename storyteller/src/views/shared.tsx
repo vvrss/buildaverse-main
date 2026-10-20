@@ -18,16 +18,6 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function downloadStory(title: string, text: string) {
-  const name = `${title.replace(/[^\p{L}\p{N} _-]+/gu, '').trim() || 'story'}.story`;
-  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 export function IssueList({ issues, onPick }: { issues: ParseIssue[]; onPick?: (line: number) => void }) {
   if (issues.length === 0) return null;
   return (

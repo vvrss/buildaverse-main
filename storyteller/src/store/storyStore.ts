@@ -4,6 +4,8 @@ import { serializeStory } from '../format/serializer';
 import { type Character, type Story, emptyStory, nextColor, slugify, uniqueId } from '../format/types';
 import { db } from './db';
 import { History } from './history';
+import { requireProfileId } from './session';
+import { settings } from './settings';
 import {
   NARRATION,
   type Voice,
@@ -77,6 +79,7 @@ export async function flushSave() {
     const existing = await db.getStory(id);
     await db.putStory({
       id,
+      profileId: existing?.profileId ?? requireProfileId(),
       title: s.title,
       text: serializeStory(s),
       lines: s.blocks.length,
@@ -101,19 +104,60 @@ function newId(): string {
     : `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export async function createStory(text?: string): Promise<string> {
+export async function createStory(text?: string, title?: string): Promise<string> {
   const id = newId();
   const s = text ? parseStory(text).story : emptyStory();
+  if (title) s.title = title;
   const now = Date.now();
-  await db.putStory({ id, title: s.title, text: serializeStory(s), lines: s.blocks.length, createdAt: now, updatedAt: now });
+  await db.putStory({
+    id,
+    profileId: requireProfileId(),
+    title: s.title,
+    text: serializeStory(s),
+    lines: s.blocks.length,
+    createdAt: now,
+    updatedAt: now,
+  });
   return id;
+}
+
+export async function duplicateStory(id: string): Promise<string | null> {
+  const record = await db.getStory(id);
+  if (!record) return null;
+  const { story: s } = parseStory(record.text);
+  s.title = `${s.title} (copy)`;
+  return createStory(serializeStory(s));
+}
+
+export async function renameStory(id: string, title: string) {
+  const clean = title.trim();
+  if (!clean) return;
+  if (storyId.value === id) {
+    setTitle(clean);
+    await flushSave();
+    return;
+  }
+  const record = await db.getStory(id);
+  if (!record) return;
+  const { story: s } = parseStory(record.text);
+  s.title = clean;
+  await db.putStory({ ...record, title: clean, text: serializeStory(s), updatedAt: Date.now() });
+}
+
+export async function deleteStory(id: string) {
+  if (storyId.value === id) {
+    clearTimeout(saveTimer);
+    saveState.value = 'saved';
+    storyId.value = null;
+  }
+  await db.deleteStory(id);
 }
 
 export async function openStory(id: string): Promise<boolean> {
   if (storyId.value === id) return true;
   await flushSave();
   const record = await db.getStory(id);
-  if (!record) return false;
+  if (!record || record.profileId !== requireProfileId()) return false;
   const { story: s } = parseStory(record.text);
   batch(() => {
     storyId.value = id;
@@ -161,7 +205,8 @@ export function commit(sameVoice = false) {
   batch(() => {
     setStory({ ...s, characters: composed.characters, blocks });
     draft.value = '';
-    const following = sameVoice ? composed.voice : voiceAfter(blocks, index, composed.characters);
+    const following =
+      sameVoice || !settings.value.autoAlternate ? composed.voice : voiceAfter(blocks, index, composed.characters);
     if (m.type === 'edit') {
       if (index + 1 < blocks.length) enterEdit(index + 1);
       else exitToNew(blocks.length, following);

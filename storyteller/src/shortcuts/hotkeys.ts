@@ -3,11 +3,18 @@
  * or null to let the browser handle it. `draftDirty` keeps Ctrl+Z as native
  * text undo while there is unsent typing.
  */
-export function hotkeyAction(e: KeyboardEvent, draftDirty: boolean, suggestionsOpen: boolean): string | null {
+export function hotkeyAction(
+  e: KeyboardEvent,
+  draftDirty: boolean,
+  suggestionsOpen: boolean,
+  enterSends = true,
+): string | null {
   const mod = e.ctrlKey || e.metaKey;
 
   if (e.key === 'Enter' && !e.isComposing) {
     if (suggestionsOpen && !e.shiftKey) return null;
+    // With "Enter sends" off, Enter is a line break and Ctrl/Cmd+Enter sends.
+    if (!enterSends) return mod ? (e.shiftKey ? 'line.commitSame' : 'line.commit') : null;
     if (e.altKey) return 'line.insertBelow';
     return e.shiftKey ? 'line.commitSame' : 'line.commit';
   }

@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { SendHorizontal } from 'lucide-preact';
 import { runAction } from '../shortcuts/actions';
 import { hotkeyAction } from '../shortcuts/hotkeys';
 import { readPrefix } from '../shortcuts/prefixes';
 import { HEADING, NARRATION, NOTE, draftOf } from '../store/logic';
 import { draft, mode, setVoice, story, voice } from '../store/storyStore';
+import { settings } from '../store/settings';
 import { composerRef } from '../store/ui';
 
 function placeholderFor(v: string, name: string | undefined): string {
@@ -85,7 +87,7 @@ export function Composer() {
         return;
       }
     }
-    const action = hotkeyAction(e, isDirty(), open);
+    const action = hotkeyAction(e, isDirty(), open, settings.value.enterSends);
     if (action) {
       e.preventDefault();
       runAction(action);
@@ -94,6 +96,7 @@ export function Composer() {
 
   // Some mobile keyboards skip keydown for Enter; catch the line break here.
   const onBeforeInput = (e: InputEvent) => {
+    if (!settings.value.enterSends && !open) return;
     if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
       e.preventDefault();
       if (open) choose(active);
@@ -125,7 +128,7 @@ export function Composer() {
           rows={1}
           value={draft.value}
           placeholder={placeholderFor(voice.value, current?.name)}
-          enterkeyhint="send"
+          enterkeyhint={settings.value.enterSends ? 'send' : 'enter'}
           autoCapitalize="sentences"
           aria-label="Write the next line"
           data-testid="composer"
@@ -140,7 +143,7 @@ export function Composer() {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => runAction('line.commit')}
         >
-          ➤
+          <SendHorizontal size={20} />
         </button>
       </div>
     </div>

@@ -1,4 +1,6 @@
+import { X } from 'lucide-preact';
 import { describeAction, runAction } from '../shortcuts/actions';
+import { GESTURE_THRESHOLDS, haptic, settings } from '../store/settings';
 import { showToast } from '../store/storyStore';
 import { gesturePadOpen } from '../store/ui';
 import { BUILTIN_GESTURES } from './defaults';
@@ -11,14 +13,14 @@ export function GesturePad() {
   if (!gesturePadOpen.value) return null;
 
   const onStroke = (points: { x: number; y: number }[]) => {
-    const match = recognize(points, templates.value);
+    const match = recognize(points, templates.value, GESTURE_THRESHOLDS[settings.value.gestureSensitivity]);
     if (!match) {
       showToast('Not recognized. Draw again, or tap to close');
       return;
     }
     const label = runAction(match.action);
     showToast(`✓ ${label ?? describeAction(match.action)}`);
-    if ('vibrate' in navigator) navigator.vibrate?.(8);
+    haptic(8);
   };
 
   const builtins = BUILTIN_GESTURES.filter((g) => !disabledBuiltins.value.includes(g.id));
@@ -53,7 +55,7 @@ export function GesturePad() {
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => (gesturePadOpen.value = false)}
       >
-        ✕
+        <X size={20} />
       </button>
     </div>
   );

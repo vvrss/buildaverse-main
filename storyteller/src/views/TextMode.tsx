@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { parseStory } from '../format/parser';
 import { serializeStory } from '../format/serializer';
 import { replaceFromText, showToast, story } from '../store/storyStore';
-import { IssueList, copyText, downloadStory } from './shared';
+import { safeFilename, saveFile } from '../export/files';
+import { IssueList, copyText } from './shared';
 
 /**
  * Raw `.story` editing. The textarea owns its text while you type, and the
@@ -36,12 +37,20 @@ export function TextMode() {
       <div class="actions">
         <button
           type="button"
+          class="btn"
           onClick={async () => showToast((await copyText(text)) ? 'Copied .story text' : 'Copy failed: select and copy by hand')}
         >
           Copy
         </button>
-        <button type="button" onClick={() => downloadStory(story.value.title, text)}>
-          Download .story
+        <button
+          type="button"
+          class="btn"
+          onClick={async () => {
+            const outcome = await saveFile(`${safeFilename(story.value.title)}.story`, text);
+            if (outcome === 'failed') showToast("Couldn't save the file. Use Copy instead.");
+          }}
+        >
+          Save .story file
         </button>
         <span class="muted small">Edits apply as you type. Undo works here too.</span>
       </div>

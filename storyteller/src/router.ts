@@ -4,7 +4,9 @@ export type Tab = 'chat' | 'text' | 'cast' | 'ai';
 export type Route =
   | { name: 'library' }
   | { name: 'story'; id: string; tab: Tab }
-  | { name: 'shortcuts' };
+  | { name: 'shortcuts' }
+  | { name: 'settings' }
+  | { name: 'account' };
 
 const TABS: Tab[] = ['chat', 'text', 'cast', 'ai'];
 
@@ -15,6 +17,8 @@ function parse(hash: string): Route {
     return { name: 'story', id: decodeURIComponent(parts[1]), tab };
   }
   if (parts[0] === 'shortcuts') return { name: 'shortcuts' };
+  if (parts[0] === 'settings') return { name: 'settings' };
+  if (parts[0] === 'account') return { name: 'account' };
   return { name: 'library' };
 }
 

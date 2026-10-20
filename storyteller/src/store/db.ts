@@ -1,10 +1,23 @@
 /**
  * Minimal IndexedDB wrapper. Falls back to memory (with `persistent` false)
  * when IndexedDB is unavailable, e.g. some private browsing modes.
+ * Everything a person writes belongs to a profile, the app's on-device account.
  */
+
+export interface ProfileRecord {
+  id: string;
+  name: string;
+  color: string;
+  /** Salted SHA-256 of the PIN. A privacy lock, not encryption. */
+  pin?: { salt: string; hash: string };
+  createdAt: number;
+  lastUsedAt: number;
+}
 
 export interface StoryRecord {
   id: string;
+  /** Missing on stories saved before profiles existed; claimed by the first profile. */
+  profileId?: string;
   title: string;
   /** The story in `.story` format: the source of truth. */
   text: string;
@@ -20,6 +33,7 @@ export interface Point {
 
 export interface GestureRecord {
   id: string;
+  profileId?: string;
   /** Action id from the shortcut registry, e.g. "voice.set:ana". */
   action: string;
   samples: Point[][];
@@ -31,18 +45,21 @@ export interface SettingRecord {
   value: unknown;
 }
 
-type StoreName = 'stories' | 'gestures' | 'settings';
-type RecordOf<S extends StoreName> = S extends 'stories'
-  ? StoryRecord
-  : S extends 'gestures'
-    ? GestureRecord
-    : SettingRecord;
+type StoreName = 'profiles' | 'stories' | 'gestures' | 'settings';
+type RecordOf<S extends StoreName> = S extends 'profiles'
+  ? ProfileRecord
+  : S extends 'stories'
+    ? StoryRecord
+    : S extends 'gestures'
+      ? GestureRecord
+      : SettingRecord;
 
 const DB_NAME = 'storyteller';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 const memory: Record<StoreName, Map<string, unknown>> = {
+  profiles: new Map(),
   stories: new Map(),
   gestures: new Map(),
   settings: new Map(),
@@ -59,9 +76,14 @@ function open(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains('stories')) db.createObjectStore('stories', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('gestures')) db.createObjectStore('gestures', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('profiles')) db.createObjectStore('profiles', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => {
+        persistent = false;
+        resolve(null);
+      };
+      req.onblocked = () => {
         persistent = false;
         resolve(null);
       };
@@ -113,19 +135,53 @@ async function remove(store: StoreName, key: string): Promise<void> {
   await request(db.transaction(store, 'readwrite').objectStore(store).delete(key));
 }
 
+const settingKey = (profileId: string, key: string) => `${profileId}:${key}`;
+
 export const db = {
-  listStories: async () => (await getAll('stories')).sort((a, b) => b.updatedAt - a.updatedAt),
+  listProfiles: async () => (await getAll('profiles')).sort((a, b) => b.lastUsedAt - a.lastUsedAt),
+  getProfile: (id: string) => get('profiles', id),
+  putProfile: (record: ProfileRecord) => put('profiles', record),
+
+  /** Deletes a profile with everything it owns. */
+  deleteProfile: async (id: string) => {
+    for (const s of await getAll('stories')) if (s.profileId === id) await remove('stories', s.id);
+    for (const g of await getAll('gestures')) if (g.profileId === id) await remove('gestures', g.id);
+    for (const s of await getAll('settings')) if (s.key.startsWith(`${id}:`)) await remove('settings', s.key);
+    await remove('profiles', id);
+  },
+
+  /** Gives records saved before profiles existed to `profileId`. */
+  claimOrphans: async (profileId: string) => {
+    for (const s of await getAll('stories')) if (!s.profileId) await put('stories', { ...s, profileId });
+    for (const g of await getAll('gestures')) if (!g.profileId) await put('gestures', { ...g, profileId });
+    const legacy = await get('settings', 'disabledBuiltins');
+    if (legacy) {
+      await put('settings', { key: settingKey(profileId, 'disabledBuiltins'), value: legacy.value });
+      await remove('settings', 'disabledBuiltins');
+    }
+  },
+
+  listStories: async (profileId: string) =>
+    (await getAll('stories')).filter((s) => s.profileId === profileId).sort((a, b) => b.updatedAt - a.updatedAt),
   getStory: (id: string) => get('stories', id),
   putStory: (record: StoryRecord) => put('stories', record),
   deleteStory: (id: string) => remove('stories', id),
 
-  listGestures: async () => (await getAll('gestures')).sort((a, b) => a.createdAt - b.createdAt),
+  listGestures: async (profileId: string) =>
+    (await getAll('gestures')).filter((g) => g.profileId === profileId).sort((a, b) => a.createdAt - b.createdAt),
   putGesture: (record: GestureRecord) => put('gestures', record),
   deleteGesture: (id: string) => remove('gestures', id),
 
-  getSetting: async <T>(key: string, fallback: T): Promise<T> =>
-    ((await get('settings', key))?.value as T | undefined) ?? fallback,
-  setSetting: (key: string, value: unknown) => put('settings', { key, value }),
+  /** Per-profile settings. */
+  getSetting: async <T>(profileId: string, key: string, fallback: T): Promise<T> =>
+    ((await get('settings', settingKey(profileId, key)))?.value as T | undefined) ?? fallback,
+  setSetting: (profileId: string, key: string, value: unknown) =>
+    put('settings', { key: settingKey(profileId, key), value }),
+
+  /** Device-wide values such as the last used profile. */
+  getGlobal: async <T>(key: string, fallback: T): Promise<T> =>
+    ((await get('settings', `global:${key}`))?.value as T | undefined) ?? fallback,
+  setGlobal: (key: string, value: unknown) => put('settings', { key: `global:${key}`, value }),
 
   ready: open,
 };

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'preact/hooks';
+import { ChevronLeft, ChevronRight, Signature, Undo2 } from 'lucide-preact';
+import { haptic, settings } from '../store/settings';
 import { HEADING, NARRATION, NOTE, voiceCycle } from '../store/logic';
 import { historyState, mode, setVoice, story, stepVoice, voice } from '../store/storyStore';
 import { focusComposer, gesturePadOpen } from '../store/ui';
@@ -56,11 +58,12 @@ export function ShortcutBar() {
       return;
     }
     if (Math.abs(dx) >= STEP_PX && Math.abs(dx) > Math.abs(dy) * 0.6) {
-      // Swipe left = next, like flicking a carousel forward.
-      stepVoice(dx < 0 ? 1 : -1);
+      // Swipe left = next, like flicking a carousel forward (unless reversed in Settings).
+      const forward = settings.value.invertSwipe ? dx > 0 : dx < 0;
+      stepVoice(forward ? 1 : -1);
       d.lastX = e.clientX;
       d.moved = true;
-      navigator.vibrate?.(4);
+      haptic(4);
     }
   };
 
@@ -86,7 +89,7 @@ export function ShortcutBar() {
   return (
     <div class="bar" onMouseDown={keepFocus} role="toolbar" aria-label="Shortcuts">
       <button type="button" class="bar-btn" aria-label="Previous line" disabled={!canBack} onClick={act('nav.prev')}>
-        ‹
+        <ChevronLeft size={22} />
       </button>
       <div
         class="chips"
@@ -112,7 +115,7 @@ export function ShortcutBar() {
         ))}
       </div>
       <button type="button" class="bar-btn" aria-label="Next line" disabled={!canForward} onClick={act('nav.next')}>
-        ›
+        <ChevronRight size={22} />
       </button>
       <button
         type="button"
@@ -121,7 +124,7 @@ export function ShortcutBar() {
         disabled={!historyState.value.canUndo}
         onClick={act('history.undo')}
       >
-        ↶
+        <Undo2 size={20} />
       </button>
       <button
         type="button"
@@ -130,7 +133,7 @@ export function ShortcutBar() {
         aria-pressed={gesturePadOpen.value}
         onClick={act('pad.toggle')}
       >
-        ✍
+        <Signature size={20} />
       </button>
     </div>
   );

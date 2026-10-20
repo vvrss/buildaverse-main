@@ -1,7 +1,24 @@
 import { type Page, expect, test } from '@playwright/test';
 
-async function newStory(page: Page) {
+async function signUp(page: Page, name = 'Ana', pin?: string) {
   await page.goto('/');
+  await page.getByTestId('get-started').click();
+  await page.getByTestId('profile-name').fill(name);
+  if (pin) await page.getByRole('switch', { name: 'Lock with a PIN' }).check();
+  await page.getByTestId('create-profile').click();
+  if (pin) {
+    await typePin(page, pin);
+    await typePin(page, pin);
+  }
+  await expect(page.locator('.home-head')).toContainText(name);
+}
+
+async function typePin(page: Page, pin: string) {
+  for (const d of pin) await page.locator('.pin-key', { hasText: d }).first().click();
+}
+
+async function newStory(page: Page) {
+  await signUp(page);
   await page.getByTestId('new-story').click();
   await expect(page.getByTestId('composer')).toBeVisible();
 }
@@ -112,7 +129,7 @@ test('drawing < on the gesture pad goes back a line, > goes forward', async ({ p
 });
 
 test('export, re-import and AI paste round-trip', async ({ page }) => {
-  await page.goto('/');
+  await signUp(page);
   await page.getByRole('button', { name: 'Open sample' }).click();
   await page.getByRole('link', { name: 'Text' }).click();
   const original = await page.getByTestId('raw-text').inputValue();
@@ -120,7 +137,7 @@ test('export, re-import and AI paste round-trip', async ({ page }) => {
 
   // Re-import as a new story: identical text.
   await page.goto('/');
-  await page.locator('input[type=file]').setInputFiles({ name: 'x.story', mimeType: 'text/plain', buffer: Buffer.from(original) });
+  await page.locator('.toolbar input[type=file]').setInputFiles({ name: 'x.story', mimeType: 'text/plain', buffer: Buffer.from(original) });
   await page.getByRole('link', { name: 'Text' }).click();
   await expect(page.getByTestId('raw-text')).toHaveValue(original);
 
@@ -143,4 +160,66 @@ test('stories persist across reloads', async ({ page }) => {
   await page.waitForTimeout(600);
   await page.reload();
   await expect(page.locator('.blk.line')).toContainText('Remember me.');
+  await page.goto('/');
+  await expect(page.locator('.card-title')).toHaveText('Untitled story');
+});
+
+test('a PIN locks the profile after a reload', async ({ page }) => {
+  await signUp(page, 'Mira', '2468');
+  await page.reload();
+  await expect(page.locator('.lock')).toContainText('Mira');
+  await typePin(page, '1111');
+  await expect(page.locator('.pin-error')).toHaveText('Wrong PIN. Try again.');
+  await typePin(page, '2468');
+  await expect(page.locator('.home-head')).toContainText('Mira');
+});
+
+test('deleting a story asks first, on the page', async ({ page }) => {
+  await signUp(page);
+  await page.getByRole('button', { name: 'Open sample' }).click();
+  await expect(page.locator('.blk').first()).toBeVisible();
+  await page.goto('/');
+  await page.getByRole('button', { name: 'More for The Lighthouse' }).click();
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('dialog', { name: 'Delete this story?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete story' }).click();
+  await expect(page.locator('.card')).toHaveCount(0);
+  await expect(page.locator('.empty-home')).toBeVisible();
+});
+
+test('full backup restores stories into another profile', async ({ page }) => {
+  await signUp(page);
+  await page.getByRole('button', { name: 'Open sample' }).click();
+  await expect(page.locator('.blk').first()).toBeVisible();
+  await page.goto('/#/settings');
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: /Export full backup/ }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^storyteller-backup-\d{4}-\d{2}-\d{2}\.json$/);
+  const file = await download.path();
+
+  // A second profile starts empty, then gets the story from the backup.
+  await page.goto('/#/account');
+  await page.getByRole('button', { name: /Add a profile/ }).click();
+  await page.getByRole('button', { name: 'Add profile' }).click();
+  await page.getByTestId('profile-name').fill('Tom');
+  await page.getByTestId('create-profile').click();
+  await expect(page.locator('.empty-home')).toBeVisible();
+
+  await page.goto('/#/settings');
+  await page.getByTestId('restore-input').setInputFiles(file!);
+  await page.getByRole('button', { name: 'Restore', exact: true }).click();
+  await expect(page.getByTestId('toast')).toContainText('Restored 1 story');
+  await page.goto('/');
+  await expect(page.locator('.card-title')).toHaveText('The Lighthouse');
+});
+
+test('theme setting switches to dark', async ({ page }) => {
+  await signUp(page);
+  await page.goto('/#/settings');
+  await page.getByRole('radio', { name: 'Dark' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });

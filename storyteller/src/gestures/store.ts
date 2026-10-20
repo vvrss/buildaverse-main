@@ -1,5 +1,6 @@
 import { computed, signal } from '@preact/signals';
 import { type GestureRecord, type Point, db } from '../store/db';
+import { profileId, requireProfileId } from '../store/session';
 import { BUILTIN_GESTURES } from './defaults';
 import { makeTemplates } from './recognizer';
 
@@ -16,17 +17,23 @@ export const templates = computed(() => [
   ...customGestures.value.flatMap((g) => makeTemplates(g.action, g.samples)),
 ]);
 
-export async function loadGestures() {
-  customGestures.value = await db.listGestures();
-  disabledBuiltins.value = await db.getSetting<string[]>('disabledBuiltins', []);
+export async function loadGestures(profile: string) {
+  customGestures.value = await db.listGestures(profile);
+  disabledBuiltins.value = await db.getSetting<string[]>(profile, 'disabledBuiltins', []);
 }
 
-export async function saveGesture(action: string, samples: Point[][]) {
+export function resetGestures() {
+  customGestures.value = [];
+  disabledBuiltins.value = [];
+}
+
+export async function saveGesture(action: string, samples: Point[][], createdAt = Date.now()) {
   const record: GestureRecord = {
-    id: `g${Date.now().toString(36)}`,
+    id: `g${createdAt.toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    profileId: requireProfileId(),
     action,
     samples: samples.map((s) => s.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) }))),
-    createdAt: Date.now(),
+    createdAt,
   };
   await db.putGesture(record);
   customGestures.value = [...customGestures.value, record];
@@ -37,9 +44,12 @@ export async function removeGesture(id: string) {
   customGestures.value = customGestures.value.filter((g) => g.id !== id);
 }
 
+export async function setDisabledBuiltins(next: string[]) {
+  disabledBuiltins.value = next;
+  if (profileId.value) await db.setSetting(profileId.value, 'disabledBuiltins', next);
+}
+
 export async function toggleBuiltin(id: string) {
   const list = disabledBuiltins.value;
-  const next = list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
-  disabledBuiltins.value = next;
-  await db.setSetting('disabledBuiltins', next);
+  await setDisabledBuiltins(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 }

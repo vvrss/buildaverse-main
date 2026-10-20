@@ -11,6 +11,7 @@ import {
   navEnd,
   story,
 } from '../store/storyStore';
+import { settings } from '../store/settings';
 import { focusComposer } from '../store/ui';
 import { Composer } from './Composer';
 import { LineView } from './LineView';
@@ -72,7 +73,8 @@ export function Editor() {
   const s = story.value;
   const m = mode.value;
   const castById = new Map(s.characters.map((c) => [c.id, c]));
-  const lead = s.characters[0]?.id;
+  const lead = settings.value.leadOnRight ? s.characters[0]?.id : undefined;
+  const showNotes = settings.value.showNotes;
 
   // Keep the line being edited, or the insertion point, in view.
   useEffect(() => {
@@ -97,6 +99,7 @@ export function Editor() {
         <div class="log" ref={log} data-testid="log">
           {s.blocks.length === 0 && <EmptyHint />}
           {s.blocks.map((block, i) => {
+            if (block.kind === 'note' && !showNotes && !(m.type === 'edit' && m.index === i)) return null;
             const prev = s.blocks[i - 1];
             const showName =
               block.kind === 'line' && !(prev?.kind === 'line' && prev.speaker === block.speaker && !block.direction);

@@ -1,7 +1,7 @@
 {
   "name": "storyteller",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,10 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.2.10",
+    "@fontsource-variable/figtree": "^5.2.10",
     "@preact/signals": "^2.3.1",
+    "lucide-preact": "^1.47.0",
     "preact": "^10.29.8"
   },
   "devDependencies": {

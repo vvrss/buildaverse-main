@@ -3,7 +3,9 @@ import { bindableActions, describeAction } from '../shortcuts/actions';
 import { HOTKEY_HELP } from '../shortcuts/hotkeys';
 import { COMMANDS } from '../shortcuts/prefixes';
 import type { Point } from '../store/db';
+import { GESTURE_THRESHOLDS, settings } from '../store/settings';
 import { story } from '../store/storyStore';
+import { Switch } from '../ui/controls';
 import { BUILTIN_GESTURES } from './defaults';
 import { makeTemplates, rank } from './recognizer';
 import { customGestures, disabledBuiltins, removeGesture, saveGesture, templates, toggleBuiltin } from './store';
@@ -72,8 +74,9 @@ function Tester() {
     const [top, second] = rank(points, templates.value);
     if (!top) return setResult('Too short.');
     const pct = (n: number) => `${Math.round(n * 100)}%`;
+    const threshold = GESTURE_THRESHOLDS[settings.value.gestureSensitivity];
     setResult(
-      `${describeAction(top.action)} · ${pct(top.score)}${top.score < 0.78 ? ' (too low, ignored)' : ''}` +
+      `${describeAction(top.action)} · ${pct(top.score)}${top.score < threshold ? ' (too low, ignored)' : ''}` +
         (second ? ` — next best: ${describeAction(second.action)} ${pct(second.score)}` : ''),
     );
   };
@@ -89,17 +92,14 @@ function Tester() {
 
 export function ShortcutsPage() {
   return (
-    <div class="page shortcuts">
-      <header class="page-head">
-        <button type="button" class="ghost" onClick={() => history.back()}>
-          ← Back
-        </button>
-        <h1>Shortcuts & gestures</h1>
+    <div class="screen shortcuts">
+      <header class="screen-head">
+        <h1 class="display">Gestures & shortcuts</h1>
       </header>
 
       <section>
         <h2>Built-in gestures</h2>
-        <p class="muted small">Open the gesture pad with ✍, by swiping up on the character chips, or with Alt+G.</p>
+        <p class="muted small">Open the gesture pad with the pen button above the keyboard, by swiping up on the character chips, or with Alt+G.</p>
         <ul class="gesture-list">
           {BUILTIN_GESTURES.map((g) => (
             <li key={g.id}>
@@ -107,10 +107,12 @@ export function ShortcutsPage() {
               <span>
                 <b>{g.symbol}</b> {describeAction(g.action)}
               </span>
-              <label class="toggle">
-                <input type="checkbox" checked={!disabledBuiltins.value.includes(g.id)} onChange={() => toggleBuiltin(g.id)} />
-                on
-              </label>
+              <Switch
+                id={`builtin-${g.id}`}
+                label={`${describeAction(g.action)} gesture`}
+                checked={!disabledBuiltins.value.includes(g.id)}
+                onChange={() => toggleBuiltin(g.id)}
+              />
             </li>
           ))}
         </ul>
