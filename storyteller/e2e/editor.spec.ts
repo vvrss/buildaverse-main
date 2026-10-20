@@ -201,8 +201,8 @@ test('full backup restores stories into another profile', async ({ page }) => {
 
   // A second profile starts empty, then gets the story from the backup.
   await page.goto('/#/account');
+  // "Add a profile" opens the new-profile form directly.
   await page.getByRole('button', { name: /Add a profile/ }).click();
-  await page.getByRole('button', { name: 'Add profile' }).click();
   await page.getByTestId('profile-name').fill('Tom');
   await page.getByTestId('create-profile').click();
   await expect(page.locator('.empty-home')).toBeVisible();
