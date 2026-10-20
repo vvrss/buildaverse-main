@@ -12,6 +12,7 @@
   --accent-soft: #ece8ff;
   --accent-text: #ffffff;
   --danger: #d23f4f;
+  --danger-text: #ffffff;
   --add: #23845a;
   --warn: #b7791f;
   --warn-bg: #fff4dc;
@@ -45,6 +46,7 @@
     --accent-soft: #2a2447;
     --accent-text: #140f2b;
     --danger: #ff6b78;
+    --danger-text: #2a0a10;
     --add: #5fd38d;
     --warn: #f0b552;
     --warn-bg: #3a3020;
@@ -68,6 +70,7 @@
   --accent-soft: #2a2447;
   --accent-text: #140f2b;
   --danger: #ff6b78;
+  --danger-text: #2a0a10;
   --add: #5fd38d;
   --warn: #f0b552;
   --warn-bg: #3a3020;
@@ -212,7 +215,7 @@ h3 {
 .btn.danger-solid {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--danger-text);
 }
 
 .btn.wide {
@@ -426,7 +429,7 @@ kbd {
 .mini-bubble b {
   display: block;
   font-size: 0.72rem;
-  color: var(--c);
+  color: color-mix(in srgb, var(--c) 62%, var(--text));
 }
 
 .mini-narration {
@@ -535,7 +538,7 @@ kbd {
   place-items: center;
   border-radius: 50%;
   background: var(--c);
-  color: #fff;
+  color: var(--on-c, #fff);
   font-weight: 700;
   font-family: var(--font-display);
   letter-spacing: 0.02em;
@@ -998,6 +1001,12 @@ kbd {
   background: var(--surface-2);
 }
 
+/* Inset, because the rounded card clips anything drawn outside the row. */
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
 .row.danger,
 .row.danger .row-icon {
   color: var(--danger);
@@ -1269,6 +1278,7 @@ kbd {
 
 .topbar .title {
   flex: 1;
+  min-width: 0;
   border-color: transparent;
   background: transparent;
   font-family: var(--font-display);
@@ -1377,7 +1387,8 @@ kbd {
 .who {
   font-size: 0.78rem;
   font-weight: 700;
-  color: var(--c);
+  /* Mixed toward the text color so every palette color stays readable. */
+  color: color-mix(in srgb, var(--c) 62%, var(--text));
   margin: 0 12px 3px;
 }
 
@@ -1485,25 +1496,38 @@ kbd {
 
 .banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
   font-size: 0.85rem;
   background: var(--accent-soft);
-  overflow-x: auto;
 }
 
-.banner span {
-  flex: 1;
+.banner-label {
+  flex: 1 1 auto;
   white-space: nowrap;
   color: var(--text);
   font-weight: 600;
   padding-left: 4px;
 }
 
+/* Wraps onto a second row on narrow screens or large text, never off-screen. */
+.banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .banner button {
-  min-height: 32px;
-  padding: 2px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  min-width: 34px;
+  justify-content: center;
+  padding: 2px 10px;
   white-space: nowrap;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1551,7 +1575,7 @@ kbd {
   border-radius: 50%;
   background: var(--c, var(--accent));
   border: none;
-  color: #fff;
+  color: var(--on-c, var(--accent-text));
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -1623,22 +1647,33 @@ kbd {
 
 .chips {
   flex: 1;
+  min-width: 0; /* lets the strip shrink on narrow phones instead of pushing buttons off-screen */
   position: relative; /* offsetParent for centering the active chip */
   display: flex;
   gap: 6px;
   overflow: hidden;
   touch-action: none;
-  padding: 4px 30%;
+  padding: 4px 0;
   mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent);
   cursor: grab;
 }
 
+/* Spacers so the first and last chips can scroll to the center. */
+.chips::before,
+.chips::after {
+  content: '';
+  flex: 0 0 35%;
+}
+
 .chip {
   flex-shrink: 0;
+  font: inherit;
+  background: transparent;
+  cursor: pointer;
   padding: 6px 13px;
   border-radius: 999px;
   border: 1.5px solid color-mix(in srgb, var(--c, var(--muted)) 55%, transparent);
-  color: var(--c, var(--muted));
+  color: color-mix(in srgb, var(--c, var(--muted)) 62%, var(--text));
   font-weight: 700;
   font-size: 0.9rem;
   white-space: nowrap;
@@ -1656,7 +1691,7 @@ kbd {
 .chip.active {
   background: var(--c, var(--muted));
   border-color: var(--c, var(--muted));
-  color: #fff;
+  color: var(--on-c, #fff);
   transform: scale(1.06);
 }
 
@@ -2096,4 +2131,41 @@ kbd {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ------------------------------------------------------- database notice */
+
+.db-notice {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px max(var(--gutter), env(safe-area-inset-left, 0px));
+  background: var(--scrim);
+}
+
+.db-notice-card {
+  max-width: 360px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+}
+
+.db-notice-card h2 {
+  margin: 0;
+  font-family: var(--font-display);
+}
+
+.db-notice-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Wrappers that only carry the inert flag; they take no part in layout. */
+.inert-wrap {
+  display: contents;
 }

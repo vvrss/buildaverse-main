@@ -4,15 +4,17 @@ import {
   type ParseIssue,
   type ParseResult,
   type Story,
+  ID_CHARS,
+  idKey,
   newBlockId,
   nextColor,
 } from './types';
 
-const ID = '[\\p{L}\\p{N}_-]+';
+const ID = `${ID_CHARS}+`;
 const DIALOG = new RegExp(`^@(${ID})\\s*(?:\\(([^)]*)\\))?\\s*:\\s?(.*)$`, 'u');
 const DIALOG_NO_COLON = new RegExp(`^@(${ID})\\s+(.*)$`, 'u');
-const LOOSE_DIALOG = /^([\p{L}][\p{L}\p{N} _.'-]{0,40}?)\s*(?:\(([^)]*)\))?\s*:\s+(.+)$/u;
-const HEADER_KEY = /^([\p{L}\p{N}_-]+)\s*:\s*(.*)$/u;
+const LOOSE_DIALOG = /^([\p{L}][\p{L}\p{M}\p{N} _.'-]{0,40}?)\s*(?:\(([^)]*)\))?\s*:\s+(.+)$/u;
+const HEADER_KEY = new RegExp(`^(${ID})\\s*:\\s*(.*)$`, 'u');
 const COLOR_TAIL = /^(.*?)\s*(#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8}))?$/i;
 
 /**
@@ -21,7 +23,10 @@ const COLOR_TAIL = /^(.*?)\s*(#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8}))?$/i;
  * pasted AI output is never silently dropped.
  */
 export function parseStory(source: string): ParseResult {
-  const lines = source.replace(/\r\n?/g, '\n').replace(/^﻿/, '').split('\n');
+  const lines = source
+    .replace(/\r\n?|[\u2028\u2029]/g, '\n')
+    .replace(/^\ufeff/, '')
+    .split('\n');
   const issues: ParseIssue[] = [];
   const story: Story = { title: 'Untitled story', characters: [], meta: [], blocks: [] };
 
@@ -34,22 +39,23 @@ export function parseStory(source: string): ParseResult {
   const byId = new Map<string, string>();
   const byName = new Map<string, string>();
   for (const c of story.characters) {
-    byId.set(c.id.toLowerCase(), c.id);
-    byName.set(c.name.toLowerCase(), c.id);
+    byId.set(idKey(c.id), c.id);
+    byName.set(idKey(c.name), c.id);
   }
 
   const resolveSpeaker = (raw: string, lineNo: number): string => {
-    const known = byId.get(raw.toLowerCase());
+    const known = byId.get(idKey(raw)) ?? byName.get(idKey(raw));
     if (known) return known;
-    const character: Character = { id: raw, name: raw, color: nextColor(story.characters) };
+    const id = raw.normalize('NFC');
+    const character: Character = { id, name: id, color: nextColor(story.characters) };
     story.characters.push(character);
-    byId.set(raw.toLowerCase(), raw);
+    byId.set(idKey(id), id);
     issues.push({
       line: lineNo,
       severity: 'warning',
       message: `Unknown character @${raw}. It was added to the cast.`,
     });
-    return raw;
+    return id;
   };
 
   let last: Block | null = null;
@@ -108,7 +114,7 @@ function parseBodyLine(
   // AI output often drops the "@": accept "Ana: text" when Ana is in the cast.
   const loose = LOOSE_DIALOG.exec(line);
   if (loose) {
-    const key = loose[1].trim().toLowerCase();
+    const key = idKey(loose[1].trim());
     const speaker = byId.get(key) ?? byName.get(key);
     if (speaker) {
       issues.push({
@@ -185,11 +191,11 @@ function readHeaderLines(
         continue;
       }
       const id = m[1];
-      if (seen.has(id.toLowerCase())) {
+      if (seen.has(idKey(id))) {
         issues.push({ line: j + 1, severity: 'warning', message: `Character @${id} is listed twice.` });
         continue;
       }
-      seen.add(id.toLowerCase());
+      seen.add(idKey(id));
       const [, name, color] = COLOR_TAIL.exec(m[2].trim()) ?? [];
       story.characters.push({
         id,

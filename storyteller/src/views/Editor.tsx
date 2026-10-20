@@ -1,10 +1,11 @@
 import { Fragment } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
+import { ArrowDown, ArrowDownToLine, ArrowUp, ListPlus, Trash2, X } from 'lucide-preact';
 import { GesturePad } from '../gestures/GesturePad';
 import { ShortcutBar } from '../shortcuts/ShortcutBar';
 import {
   deleteCurrent,
-  enterEdit,
+  selectLine,
   insertBelow,
   mode,
   moveCurrent,
@@ -29,21 +30,35 @@ function EditBanner() {
   if (m.type === 'new') {
     return (
       <div class="banner" onMouseDown={keepFocus}>
-        <span>{m.at === 0 ? 'Inserting at the start' : `Inserting after line ${m.at}`}</span>
-        <button type="button" onClick={run(navEnd)}>Jump to end ⤓</button>
+        <span class="banner-label">{m.at === 0 ? 'Inserting at the start' : `Inserting after line ${m.at}`}</span>
+        <button type="button" onClick={run(navEnd)}>
+          <ArrowDownToLine size={16} /> Jump to end
+        </button>
       </div>
     );
   }
   return (
     <div class="banner editing" onMouseDown={keepFocus}>
-      <span>
+      <span class="banner-label">
         Editing line {m.index + 1}/{len}
       </span>
-      <button type="button" aria-label="Move up" onClick={run(() => moveCurrent(-1))} disabled={m.index === 0}>↑</button>
-      <button type="button" aria-label="Move down" onClick={run(() => moveCurrent(1))} disabled={m.index >= len - 1}>↓</button>
-      <button type="button" onClick={run(insertBelow)}>+ Below</button>
-      <button type="button" class="danger" onClick={run(deleteCurrent)}>Delete</button>
-      <button type="button" aria-label="Stop editing" onClick={run(navEnd)}>✕</button>
+      <div class="banner-actions">
+        <button type="button" aria-label="Move up" onClick={run(() => moveCurrent(-1))} disabled={m.index === 0}>
+          <ArrowUp size={16} />
+        </button>
+        <button type="button" aria-label="Move down" onClick={run(() => moveCurrent(1))} disabled={m.index >= len - 1}>
+          <ArrowDown size={16} />
+        </button>
+        <button type="button" onClick={run(insertBelow)}>
+          <ListPlus size={16} /> Below
+        </button>
+        <button type="button" class="danger" onClick={run(deleteCurrent)}>
+          <Trash2 size={16} /> Delete
+        </button>
+        <button type="button" aria-label="Stop editing" onClick={run(navEnd)}>
+          <X size={16} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -89,7 +104,7 @@ export function Editor() {
   }, [m, s.blocks.length]);
 
   const select = (index: number) => {
-    enterEdit(index);
+    selectLine(index);
     focusComposer();
   };
 

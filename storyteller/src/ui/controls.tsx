@@ -1,5 +1,7 @@
 import type { ComponentChildren } from 'preact';
+import { useRef } from 'preact/hooks';
 import { ChevronRight } from 'lucide-preact';
+import { tint } from './color';
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -13,7 +15,7 @@ export function Avatar({ name, color, size = 40 }: { name: string; color: string
   return (
     <span
       class="avatar"
-      style={`--c:${color};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px`}
+      style={`${tint(color)};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.4)}px`}
       aria-hidden="true"
     >
       {initials(name)}
@@ -133,5 +135,47 @@ export function ColorSwatches({ value, colors, onChange }: { value: string; colo
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * A button that opens the file picker. Unlike a label around a hidden input,
+ * it can be reached and pressed with the keyboard.
+ */
+export function FilePicker({
+  accept,
+  onPick,
+  children,
+  class: className = 'btn',
+  label,
+  testId,
+}: {
+  accept: string;
+  onPick: (file: File) => void;
+  children: ComponentChildren;
+  class?: string;
+  label?: string;
+  testId?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" class={className} aria-label={label} onClick={() => input.current?.click()}>
+        {children}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept={accept}
+        hidden
+        data-testid={testId}
+        onChange={(e) => {
+          const el = e.currentTarget as HTMLInputElement;
+          const file = el.files?.[0];
+          el.value = '';
+          if (file) onPick(file);
+        }}
+      />
+    </>
   );
 }

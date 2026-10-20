@@ -5,8 +5,9 @@ import type { Block, Story } from '../format/types';
 import { go, storyPath } from '../router';
 import { type StoryRecord, db, persistent } from '../store/db';
 import { currentProfile } from '../store/profile';
-import { createStory, deleteStory, duplicateStory, renameStory, showToast } from '../store/storyStore';
-import { Avatar, Row } from '../ui/controls';
+import { createStory, deleteStory, duplicateStory, flushSave, renameStory, showToast } from '../store/storyStore';
+import { onBroadcast } from '../store/sync';
+import { Avatar, FilePicker, Row } from '../ui/controls';
 import { Sheet, closeSheet, confirmAction, showSheet } from '../ui/overlay';
 import { ExportSheet } from './ExportSheet';
 import { SAMPLE_STORY } from './sample';
@@ -136,9 +137,17 @@ export function Home() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'recent' | 'title'>('recent');
 
-  const refresh = () => db.listStories(profile.id).then(setRecords);
+  // Waits for the story you just left to finish saving, so its card is current.
+  const refresh = () =>
+    flushSave()
+      .then(() => db.listStories(profile.id))
+      .then(setRecords);
   useEffect(() => {
     void refresh();
+    // Stories saved or deleted in another window show up here too.
+    return onBroadcast((msg) => {
+      if (msg.type === 'story-saved' || msg.type === 'story-deleted') void refresh();
+    });
   }, [profile.id]);
 
   const cards = useMemo<Card[]>(
@@ -164,12 +173,17 @@ export function Home() {
     go(storyPath(id));
   };
 
-  const importFile = async (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
+  const importFile = async (file: File) => {
+    if (/^(image|audio|video)\//.test(file.type) || file.size > 5 * 1024 * 1024) {
+      showToast("That file isn't a story. Pick a .story or text file.");
+      return;
+    }
     const text = await file.text();
+    // Binary files decode with NUL or replacement characters.
+    if (/[\u0000\ufffd]/.test(text.slice(0, 4096))) {
+      showToast("That file isn't a story. Pick a .story or text file.");
+      return;
+    }
     if (text.trimStart().startsWith('{')) {
       showToast('That looks like a backup. Restore it from Settings → Data.');
       return;
@@ -213,11 +227,9 @@ export function Home() {
           >
             {sort === 'recent' ? 'Recent' : 'A–Z'}
           </button>
-          <label class="chip-btn" title="Import a .story file">
+          <FilePicker class="chip-btn" accept=".story,.txt,text/plain" onPick={importFile} label="Import a .story file">
             <FileUp size={16} />
-            <span class="sr-only">Import a .story file</span>
-            <input type="file" accept=".story,.txt,text/plain" hidden onChange={importFile} />
-          </label>
+          </FilePicker>
         </div>
       )}
 
@@ -240,10 +252,9 @@ export function Home() {
             <button type="button" class="btn" onClick={() => create(SAMPLE_STORY)}>
               Open sample
             </button>
-            <label class="btn">
+            <FilePicker accept=".story,.txt,text/plain" onPick={importFile}>
               <FileUp size={18} /> Import
-              <input type="file" accept=".story,.txt,text/plain" hidden onChange={importFile} />
-            </label>
+            </FilePicker>
           </div>
         </div>
       )}

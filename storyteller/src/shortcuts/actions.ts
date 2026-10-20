@@ -45,9 +45,14 @@ function resolve(id: string): ActionDef | null {
   if (pick) {
     const n = Number(pick[1]);
     const c = s.story.value.characters[n];
-    return { label: c ? c.name : `Character ${n + 1}`, run: () => s.pickCharacter(n) };
+    return c ? { label: c.name, run: () => s.pickCharacter(n) } : null;
   }
   return null;
+}
+
+/** Whether an action can do something right now (its character exists in this story). */
+export function canRun(id: string): boolean {
+  return resolve(id) !== null;
 }
 
 /** Runs an action; returns its label (for feedback) or null when unknown. */
@@ -59,7 +64,11 @@ export function runAction(id: string): string | null {
 }
 
 export function describeAction(id: string): string {
-  return resolve(id)?.label ?? id.replace(/^voice\.set:/, '@');
+  const label = resolve(id)?.label;
+  if (label) return label;
+  const pick = /^voice\.pick:(\d+)$/.exec(id);
+  if (pick) return `Character #${Number(pick[1]) + 1}`;
+  return id.replace(/^voice\.set:/, '@');
 }
 
 /** Actions offered when binding a custom gesture. */

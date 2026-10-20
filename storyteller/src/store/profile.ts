@@ -1,16 +1,18 @@
 import { batch, computed, signal } from '@preact/signals';
 import { PALETTE } from '../format/types';
-import { go } from '../router';
 import { loadGestures, resetGestures } from '../gestures/store';
+import { go } from '../router';
 import { type ProfileRecord, db } from './db';
 import { checkPin, makePin } from './pin';
 import { profileId } from './session';
-import { loadSettings, resetSettingsView } from './settings';
-import { closeStory } from './storyStore';
+import { loadSettings, previewAppearance, resetSettingsView } from './settings';
+import { closeStory, recoverJournals, showToast } from './storyStore';
+import { broadcast, onBroadcast } from './sync';
+import { gesturePadOpen } from './ui';
 
 /**
- * Profiles are the app's accounts. They live on this device only; a backup
- * file moves one to another device.
+ * Profiles are the app's accounts on this device. A backup file moves one
+ * to another device; a community account can be linked for publishing.
  */
 
 export const profiles = signal<ProfileRecord[]>([]);
@@ -18,6 +20,8 @@ export const currentProfile = signal<ProfileRecord | null>(null);
 /** A profile that was picked but still needs its PIN. */
 export const lockedProfile = signal<ProfileRecord | null>(null);
 export const profilesReady = signal(false);
+/** Set by "Add a profile" so the picker opens straight on the new-profile form. */
+export const startAddingProfile = signal(false);
 
 export const hasProfiles = computed(() => profiles.value.length > 0);
 
@@ -33,17 +37,31 @@ async function refresh() {
   profiles.value = await db.listProfiles();
 }
 
-async function activate(p: ProfileRecord) {
-  const updated = { ...p, lastUsedAt: Date.now() };
+/**
+ * Writes a change to the stored profile. The record is always re-read
+ * first, so a window holding an old copy can never undo a PIN set elsewhere.
+ */
+async function writeProfile(id: string, change: (p: ProfileRecord) => ProfileRecord): Promise<ProfileRecord | null> {
+  const fresh = await db.getProfile(id);
+  if (!fresh) return null;
+  const updated = change(fresh);
   await db.putProfile(updated);
+  if (currentProfile.value?.id === id) currentProfile.value = updated;
+  broadcast({ type: 'profile-changed', id });
+  await refresh();
+  return updated;
+}
+
+async function activate(p: ProfileRecord) {
+  const updated = (await writeProfile(p.id, (fresh) => ({ ...fresh, lastUsedAt: Date.now() }))) ?? p;
   await db.setGlobal('lastProfile', p.id);
-  await Promise.all([loadSettings(p.id), loadGestures(p.id)]);
+  await db.setGlobal('signedOut', false);
+  await Promise.all([loadSettings(p.id), loadGestures(p.id), recoverJournals(p.id)]);
   batch(() => {
     profileId.value = p.id;
     currentProfile.value = updated;
     lockedProfile.value = null;
   });
-  await refresh();
 }
 
 /** On app start: resume the last profile, or ask for its PIN. */
@@ -52,6 +70,7 @@ export async function initProfiles() {
   const lastId = await db.getGlobal<string | null>('lastProfile', null);
   const last = profiles.value.find((p) => p.id === lastId) ?? (profiles.value.length === 1 ? profiles.value[0] : undefined);
   const signedOut = await db.getGlobal<boolean>('signedOut', false);
+  if (last) await previewAppearance(last.id);
   if (last && !signedOut) {
     if (last.pin) lockedProfile.value = last;
     else await activate(last);
@@ -72,43 +91,75 @@ export async function createProfile(input: { name: string; color: string; pin?: 
   };
   await db.putProfile(record);
   if (first) await db.claimOrphans(record.id);
-  await db.setGlobal('signedOut', false);
+  startAddingProfile.value = false;
   await activate(record);
   return record;
 }
 
 /** Picks a profile from the "Who's writing?" screen. */
 export async function chooseProfile(p: ProfileRecord) {
-  await db.setGlobal('signedOut', false);
-  if (p.pin) lockedProfile.value = p;
-  else await activate(p);
+  // The tile may be stale: decide on the lock from the stored record.
+  const fresh = (await db.getProfile(p.id)) ?? p;
+  await previewAppearance(fresh.id);
+  if (fresh.pin) lockedProfile.value = fresh;
+  else await activate(fresh);
 }
 
-let failures = 0;
-let blockedUntil = 0;
+// ------------------------------------------------------------ PIN lockout
 
-/** Returns an error message, or null when unlocked. */
-export async function unlock(pin: string): Promise<string | null> {
-  const p = lockedProfile.value;
-  if (!p?.pin) return null;
-  if (Date.now() < blockedUntil) {
-    return `Too many tries. Wait ${Math.ceil((blockedUntil - Date.now()) / 1000)} seconds.`;
+const MAX_TRIES = 5;
+const BLOCK_MS = 30_000;
+
+interface Lockout {
+  failures: number;
+  until: number;
+}
+
+/** Wrong-PIN counting, stored per profile so a reload does not reset it. */
+async function checkWithLockout(p: ProfileRecord, pin: string): Promise<string | null> {
+  if (!p.pin) return null;
+  const key = `pinLock:${p.id}`;
+  const state = await db.getGlobal<Lockout>(key, { failures: 0, until: 0 });
+  if (Date.now() < state.until) {
+    return `Too many tries. Wait ${Math.ceil((state.until - Date.now()) / 1000)} seconds.`;
   }
   if (await checkPin(pin, p.pin)) {
-    failures = 0;
-    await activate(p);
+    if (state.failures) await db.setGlobal(key, { failures: 0, until: 0 });
     return null;
   }
-  failures += 1;
-  if (failures >= 5) {
-    failures = 0;
-    blockedUntil = Date.now() + 30_000;
-    return 'Wrong PIN 5 times. Wait 30 seconds.';
+  const failures = state.failures + 1;
+  if (failures >= MAX_TRIES) {
+    await db.setGlobal(key, { failures: 0, until: Date.now() + BLOCK_MS });
+    return `Wrong PIN ${MAX_TRIES} times. Wait 30 seconds.`;
   }
+  await db.setGlobal(key, { failures, until: 0 });
   return 'Wrong PIN. Try again.';
 }
 
+/** Returns an error message, or null when unlocked. */
+export async function unlock(pin: string): Promise<string | null> {
+  const locked = lockedProfile.value;
+  if (!locked) return null;
+  const fresh = (await db.getProfile(locked.id)) ?? locked;
+  const error = await checkWithLockout(fresh, pin);
+  if (error) return error;
+  await activate(fresh);
+  return null;
+}
+
+/** Checks the signed-in profile's PIN before changing or removing it. */
+export async function verifyCurrentPin(pin: string): Promise<string | null> {
+  const p = currentProfile.value;
+  if (!p) return 'Not signed in.';
+  const fresh = (await db.getProfile(p.id)) ?? p;
+  return checkWithLockout(fresh, pin);
+}
+
+// ------------------------------------------------------------- leaving
+
 async function leave() {
+  gesturePadOpen.value = false;
+  // Saves and clears the editor, so nothing from this profile shows in the next.
   await closeStory();
   // The next profile starts on its own home screen, not on this one's last page.
   go('/', true);
@@ -125,11 +176,14 @@ export async function lockNow() {
   const p = currentProfile.value;
   if (!p?.pin) return;
   await leave();
+  await previewAppearance(p.id);
   lockedProfile.value = p;
 }
 
 /** Back to the "Who's writing?" screen. */
-export async function signOut() {
+export async function signOut(opts: { addProfile?: boolean } = {}) {
+  // Set before leaving, so the picker opens straight on the form.
+  startAddingProfile.value = !!opts.addProfile;
   await leave();
   lockedProfile.value = null;
   await db.setGlobal('signedOut', true);
@@ -142,24 +196,22 @@ export function cancelUnlock() {
 export async function updateProfile(patch: Partial<Pick<ProfileRecord, 'name' | 'color'>>) {
   const p = currentProfile.value;
   if (!p) return;
-  const updated = { ...p, ...patch };
-  currentProfile.value = updated;
-  await db.putProfile(updated);
-  await refresh();
+  currentProfile.value = { ...p, ...patch };
+  await writeProfile(p.id, (fresh) => ({ ...fresh, ...patch }));
 }
 
 export async function setPin(pin: string | null) {
   const p = currentProfile.value;
   if (!p) return;
-  const updated: ProfileRecord = { ...p, pin: pin ? await makePin(pin) : undefined };
-  currentProfile.value = updated;
-  await db.putProfile(updated);
-  await refresh();
+  const next = pin ? await makePin(pin) : undefined;
+  await writeProfile(p.id, (fresh) => ({ ...fresh, pin: next }));
 }
 
-export async function verifyCurrentPin(pin: string): Promise<boolean> {
+/** Merges extra fields (such as the linked community account) into the profile. */
+export async function patchProfile(change: (p: ProfileRecord) => ProfileRecord) {
   const p = currentProfile.value;
-  return !p?.pin || checkPin(pin, p.pin);
+  if (!p) return null;
+  return writeProfile(p.id, change);
 }
 
 /** Deletes the signed-in profile and all of its stories, gestures and settings. */
@@ -168,6 +220,37 @@ export async function deleteCurrentProfile() {
   if (!p) return;
   await leave();
   await db.deleteProfile(p.id);
+  await db.setGlobal(`pinLock:${p.id}`, { failures: 0, until: 0 });
+  broadcast({ type: 'profile-deleted', id: p.id });
   await refresh();
   await db.setGlobal('signedOut', true);
 }
+
+// Other windows: keep the profile list, PIN and name in step.
+onBroadcast((msg) => {
+  if (msg.type === 'profile-changed') {
+    void (async () => {
+      await refresh();
+      const cur = currentProfile.value;
+      if (cur?.id === msg.id) {
+        const fresh = await db.getProfile(msg.id);
+        if (fresh) currentProfile.value = fresh;
+      }
+      const locked = lockedProfile.value;
+      if (locked?.id === msg.id) {
+        const fresh = await db.getProfile(msg.id);
+        lockedProfile.value = fresh?.pin ? fresh : null;
+        if (fresh && !fresh.pin) await activate(fresh);
+      }
+    })();
+  } else if (msg.type === 'profile-deleted') {
+    void (async () => {
+      if (currentProfile.value?.id === msg.id || lockedProfile.value?.id === msg.id) {
+        await leave();
+        lockedProfile.value = null;
+        showToast('This profile was deleted in another window.');
+      }
+      await refresh();
+    })();
+  }
+});

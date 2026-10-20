@@ -38,21 +38,38 @@ interface SheetProps {
   onClose?: () => void;
 }
 
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]):not([type=hidden]), select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function Sheet({ title, children, onClose }: SheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const close = () => (onClose ? onClose() : closeSheet());
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    // Focus goes into the dialog and comes back to what opened it.
+    const opener = document.activeElement as HTMLElement | null;
+    const el = panel.current;
+    const target =
+      el?.querySelector<HTMLElement>('[data-autofocus]') ??
+      el?.querySelector<HTMLElement>(`.sheet-body ${FOCUSABLE}`) ??
+      el;
+    target?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      // Only the top sheet reacts, so Esc closes one layer at a time.
+      if (e.key !== 'Escape' || !el || el.closest('[inert]')) return;
+      e.stopPropagation();
+      close();
+    };
     window.addEventListener('keydown', onKey);
-    panel.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
   }, []);
 
   return (
     <div class="sheet-layer">
       <div class="sheet-backdrop" onClick={close} />
-      <div class="sheet" role="dialog" aria-modal="true" aria-label={title} ref={panel}>
+      <div class="sheet" role="dialog" aria-modal="true" aria-label={title} ref={panel} tabIndex={-1}>
         <div class="sheet-grip" aria-hidden="true" />
         <header class="sheet-head">
           <h2>{title}</h2>
@@ -66,14 +83,35 @@ export function Sheet({ title, children, onClose }: SheetProps) {
   );
 }
 
+/** Makes everything except the top sheet unreachable (no focus, no clicks, hidden from screen readers). */
+function Inert({ on, children }: { on: boolean; children: ComponentChildren }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.inert = on;
+  }, [on]);
+  return (
+    <div ref={ref} class="inert-wrap">
+      {children}
+    </div>
+  );
+}
+
 export function SheetHost() {
+  const list = sheets.value;
   return (
     <>
-      {sheets.value.map((s) => (
-        <div key={s.id}>{s.node}</div>
+      {list.map((s, i) => (
+        <Inert key={s.id} on={i < list.length - 1}>
+          {s.node}
+        </Inert>
       ))}
     </>
   );
+}
+
+/** Wraps the screen so it is inert while any sheet is open. */
+export function ScreenBehindSheets({ children }: { children: ComponentChildren }) {
+  return <Inert on={sheets.value.length > 0}>{children}</Inert>;
 }
 
 interface ConfirmOptions {
@@ -94,13 +132,14 @@ export function confirmAction(opts: ConfirmOptions): Promise<boolean> {
       <Sheet title={opts.title} onClose={() => done(false)}>
         <div class="confirm-message">{opts.message}</div>
         <div class="sheet-actions">
-          <button type="button" class="btn" onClick={() => done(false)}>
+          {/* For deletions, Cancel gets the focus, so a stray Enter never deletes. */}
+          <button type="button" class="btn" data-autofocus={opts.danger ? true : undefined} onClick={() => done(false)}>
             Cancel
           </button>
           <button
             type="button"
             class={`btn ${opts.danger ? 'danger-solid' : 'primary'}`}
-            data-autofocus
+            data-autofocus={opts.danger ? undefined : true}
             onClick={() => done(true)}
           >
             {opts.confirmLabel}

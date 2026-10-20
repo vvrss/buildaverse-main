@@ -45,7 +45,8 @@ export function ExportSheet({ story }: { story: Story }) {
     done();
   };
   const share = async () => {
-    if (!(await shareFile(`${name}.story`, serializeStory(story)))) showToast('Sharing was cancelled');
+    const outcome = await shareFile(`${name}.story.txt`, serializeStory(story));
+    if (outcome === 'failed' || outcome === 'unsupported') showToast("This device couldn't share the file. Use Story file instead.");
     done();
   };
 

@@ -59,9 +59,26 @@ export function parseBackup(text: string): { backup: Backup } | { error: string 
   const stories = data.stories.filter(
     (s): s is Backup['stories'][number] => isObj(s) && typeof s.text === 'string' && typeof s.id === 'string',
   );
-  const gestures = (Array.isArray(data.gestures) ? data.gestures : []).filter(
-    (g): g is Backup['gestures'][number] => isObj(g) && typeof g.action === 'string' && Array.isArray(g.samples),
-  );
+  // A gesture is kept only if every sample is a real stroke; one bad entry
+  // would otherwise break the gesture pad and the Gestures page on every load.
+  const isPoint = (p: unknown) => isObj(p) && Number.isFinite(p.x) && Number.isFinite(p.y);
+  const isStroke = (s: unknown) => Array.isArray(s) && s.length >= 2 && s.length <= 5000 && s.every(isPoint);
+  const gestures = (Array.isArray(data.gestures) ? data.gestures : [])
+    .filter(
+      (g): g is Backup['gestures'][number] =>
+        isObj(g) &&
+        typeof g.action === 'string' &&
+        g.action.length <= 200 &&
+        Array.isArray(g.samples) &&
+        g.samples.length > 0 &&
+        g.samples.length <= 10 &&
+        g.samples.every(isStroke),
+    )
+    .map((g) => ({
+      action: g.action,
+      samples: g.samples.map((s) => s.map((p) => ({ x: Number(p.x), y: Number(p.y) }))),
+      createdAt: Number(g.createdAt) || Date.now(),
+    }));
   const profile = isObj(data.profile) ? data.profile : {};
   return {
     backup: {

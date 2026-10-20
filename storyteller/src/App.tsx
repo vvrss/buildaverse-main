@@ -5,10 +5,11 @@ import { ShortcutsPage } from './gestures/GestureSettings';
 import { type Tab, go, route, storyPath } from './router';
 import { trackVisualViewport } from './shortcuts/keyboardViewport';
 import { currentProfile, hasProfiles, lockedProfile, profilesReady } from './store/profile';
-import { closeStory, openStory, saveState, setTitle, story, storyId, toast } from './store/storyStore';
+import { dbStatus } from './store/db';
+import { closeStory, openStory, saveState, setTitle, settleEdit, story, storyId, toast } from './store/storyStore';
 import { profileId } from './store/session';
 import { gesturePadOpen } from './store/ui';
-import { SheetHost, closeAllSheets, showSheet } from './ui/overlay';
+import { ScreenBehindSheets, SheetHost, closeAllSheets, showSheet } from './ui/overlay';
 import { AccountScreen } from './views/AccountScreen';
 import { AiExchange } from './views/AiExchange';
 import { CharactersPanel } from './views/CharactersPanel';
@@ -28,8 +29,37 @@ effect(() => {
   if (key !== screenKey) {
     screenKey = key;
     closeAllSheets();
+    // Leaving the Write tab: an open edit or typed line goes into the story
+    // before Text, Cast or AI read it.
+    if (r.name === 'story' && r.tab !== 'chat') settleEdit();
   }
 });
+
+/** Shown when another window holds or has upgraded the database. */
+function DbNotice() {
+  const status = dbStatus.value;
+  if (status === 'ok') return null;
+  return (
+    <div class="db-notice" role="alertdialog" aria-live="assertive">
+      <div class="db-notice-card">
+        {status === 'blocked' ? (
+          <>
+            <h2>Finishing an update</h2>
+            <p>Storyteller is open in another window or tab with an older version. Close it to continue. Nothing is lost.</p>
+          </>
+        ) : (
+          <>
+            <h2>Storyteller was updated</h2>
+            <p>A newer version is running in another window. Reload to keep writing here.</p>
+            <button type="button" class="btn primary" onClick={() => location.reload()}>
+              Reload
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const TABS: [Tab, string][] = [
   ['chat', 'Write'],
@@ -67,6 +97,10 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
     });
     return () => {
       alive = false;
+      // However the story is left (in-app back, the phone's back, a link),
+      // everything is saved and the gesture pad does not follow.
+      gesturePadOpen.value = false;
+      void closeStory(id);
     };
   }, [id]);
 
@@ -77,7 +111,7 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
   if (state === 'loading') return <div class="screen muted center">Opening…</div>;
 
   const back = async () => {
-    await closeStory();
+    await closeStory(id);
     go('/');
   };
 
@@ -92,6 +126,7 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
           </button>
           <input
             id="story-title"
+            type="text"
             class="title"
             value={story.value.title}
             aria-label="Story title"
@@ -171,9 +206,10 @@ export function App() {
 
   return (
     <div class="shell" ref={shell}>
-      {content}
+      <ScreenBehindSheets>{content}</ScreenBehindSheets>
       <SheetHost />
       <Toast />
+      <DbNotice />
     </div>
   );
 }

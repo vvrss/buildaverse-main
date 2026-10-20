@@ -1,12 +1,13 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { SendHorizontal } from 'lucide-preact';
 import { runAction } from '../shortcuts/actions';
-import { hotkeyAction } from '../shortcuts/hotkeys';
+import { hotkeyAction, isComposing } from '../shortcuts/hotkeys';
 import { readPrefix } from '../shortcuts/prefixes';
-import { HEADING, NARRATION, NOTE, draftOf } from '../store/logic';
+import { HEADING, NARRATION, NOTE } from '../store/logic';
 import { draft, mode, setVoice, story, voice } from '../store/storyStore';
 import { settings } from '../store/settings';
 import { composerRef } from '../store/ui';
+import { tint } from '../ui/color';
 
 function placeholderFor(v: string, name: string | undefined): string {
   if (v === NARRATION) return 'Narration…  (@name to speak)';
@@ -18,6 +19,16 @@ function placeholderFor(v: string, name: string | undefined): string {
 export function Composer() {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const [selected, setSelected] = useState(0);
+  /**
+   * How many of your own edits the textarea's native undo can take back. It
+   * resets whenever the app changes the text itself (sending, moving between
+   * lines), because the browser's undo history is gone then.
+   */
+  const typed = useRef(0);
+  const lastTyped = useRef<string | null>(null);
+  /** After Esc with nothing left to do, Tab moves focus on instead of switching speaker. */
+  const releaseTab = useRef(false);
+  const composedAt = useRef(0);
 
   const characters = story.value.characters;
   const current = characters.find((c) => c.id === voice.value);
@@ -46,10 +57,29 @@ export function Composer() {
     s.pick();
   };
 
+  const syncTyped = () => {
+    if (lastTyped.current !== draft.value) {
+      typed.current = 0;
+      lastTyped.current = draft.value;
+    }
+  };
+
   const onInput = (e: Event) => {
     const value = (e.currentTarget as HTMLTextAreaElement).value;
-    const state = readPrefix(value, characters);
+    const input = e as InputEvent;
+    syncTyped();
+    if (input.inputType === 'historyUndo') typed.current = Math.max(0, typed.current - 1);
+    else typed.current += 1;
+    lastTyped.current = value;
+    releaseTab.current = false;
     setSelected(0);
+    // Mid-composition text, and lines being edited, are taken as typed: no
+    // prefix rewriting (an edited line may start with its own marker).
+    if (input.isComposing || mode.value.type === 'edit') {
+      draft.value = value;
+      return;
+    }
+    const state = readPrefix(value, characters);
     if (state.type === 'switch') {
       setVoice(state.speaker);
       draft.value = state.rest;
@@ -61,14 +91,16 @@ export function Composer() {
     }
   };
 
+  /** Native undo still has typing to take back. */
   const isDirty = () => {
-    const m = mode.value;
-    if (m.type === 'new') return draft.value.length > 0;
-    const block = story.value.blocks[m.index];
-    return !!block && draft.value !== draftOf(block);
+    syncTyped();
+    return typed.current > 0;
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
+    // Keys during IME composition (and Safari's confirming Enter) belong to the IME.
+    if (isComposing(e) || (e.key === 'Enter' && performance.now() - composedAt.current < 60)) return;
+    if (e.key === 'Tab' && releaseTab.current && !open) return;
     if (open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -87,15 +119,28 @@ export function Composer() {
         return;
       }
     }
-    const action = hotkeyAction(e, isDirty(), open, settings.value.enterSends);
+    const m = mode.value;
+    if (e.key === 'Escape' && m.type === 'new' && m.at >= story.value.blocks.length) {
+      // Nothing to stop: let Tab move focus normally from now on.
+      releaseTab.current = true;
+      return;
+    }
+    const action = hotkeyAction(e, { draftDirty: isDirty(), suggestionsOpen: open, enterSends: settings.value.enterSends });
     if (action) {
       e.preventDefault();
       runAction(action);
     }
   };
 
+  const onCompositionEnd = (e: Event) => {
+    composedAt.current = performance.now();
+    // Now that the text is final, apply typed prefixes like "@ana ".
+    onInput(e);
+  };
+
   // Some mobile keyboards skip keydown for Enter; catch the line break here.
   const onBeforeInput = (e: InputEvent) => {
+    if (e.isComposing) return;
     if (!settings.value.enterSends && !open) return;
     if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') {
       e.preventDefault();
@@ -122,7 +167,7 @@ export function Composer() {
           ))}
         </ul>
       )}
-      <div class="composer" style={current ? `--c:${current.color}` : undefined}>
+      <div class="composer" style={current ? tint(current.color) : undefined}>
         <textarea
           ref={textarea}
           rows={1}
@@ -135,6 +180,7 @@ export function Composer() {
           onInput={onInput}
           onKeyDown={onKeyDown}
           onBeforeInput={onBeforeInput}
+          onCompositionEnd={onCompositionEnd}
         />
         <button
           type="button"

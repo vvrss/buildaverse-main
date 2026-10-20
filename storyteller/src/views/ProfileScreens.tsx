@@ -7,6 +7,7 @@ import {
   createProfile,
   lockedProfile,
   profiles,
+  startAddingProfile,
   unlock,
 } from '../store/profile';
 import { Avatar, ColorSwatches, Switch } from '../ui/controls';
@@ -15,19 +16,24 @@ import { PinPad } from '../ui/PinPad';
 /** Two-step PIN entry: choose, then repeat. */
 export function PinSetup({ onSet, onCancel }: { onSet: (pin: string) => void | Promise<void>; onCancel?: () => void }) {
   const [first, setFirst] = useState<string | null>(null);
+  const [mismatch, setMismatch] = useState(false);
   return (
     <div class="pin-setup">
       <PinPad
-        key={first ? 'confirm' : 'choose'}
+        key={first ? 'confirm' : mismatch ? 'retry' : 'choose'}
         label={first ? 'Enter the same PIN again' : 'Choose a 4-digit PIN'}
+        // The pad is replaced between steps, so the mismatch message is handed to the new one.
+        message={!first && mismatch ? "The PINs didn't match. Choose a PIN again." : null}
         onComplete={async (pin) => {
           if (!first) {
             setFirst(pin);
+            setMismatch(false);
             return null;
           }
           if (pin !== first) {
             setFirst(null);
-            return "The PINs didn't match. Choose a PIN again.";
+            setMismatch(true);
+            return null;
           }
           await onSet(pin);
           return null;
@@ -169,7 +175,11 @@ export function Welcome() {
 }
 
 export function ProfilePicker() {
-  const [adding, setAdding] = useState(false);
+  const [adding, setAddingState] = useState(startAddingProfile.value);
+  const setAdding = (value: boolean) => {
+    startAddingProfile.value = false;
+    setAddingState(value);
+  };
 
   if (adding) {
     return (

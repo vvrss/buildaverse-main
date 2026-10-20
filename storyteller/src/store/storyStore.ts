@@ -2,12 +2,16 @@ import { batch, signal } from '@preact/signals';
 import { parseStory } from '../format/parser';
 import { serializeStory } from '../format/serializer';
 import { type Character, type Story, emptyStory, nextColor, slugify, uniqueId } from '../format/types';
+import { go, storyPath } from '../router';
 import { db } from './db';
 import { History } from './history';
-import { requireProfileId } from './session';
+import { profileId, requireProfileId } from './session';
 import { settings } from './settings';
+import { broadcast, onBroadcast } from './sync';
 import {
+  HEADING,
   NARRATION,
+  NOTE,
   type Voice,
   compose,
   countLines,
@@ -43,6 +47,12 @@ const history = new History<Snapshot>();
 let pendingNew: { draft: string; voice: Voice } | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let toastKey = 0;
+/** updatedAt of the open story as this window last read or wrote it. */
+let knownUpdatedAt = 0;
+/** Saves run one after another, so two flushes never race each other. */
+let saveChain: Promise<void> = Promise.resolve();
+/** Work that must reach the story before it is saved (e.g. Text mode's pending edit). */
+const flushHooks = new Set<() => void>();
 
 const snapshot = (): Snapshot => ({ story: story.value, mode: mode.value, voice: voice.value });
 
@@ -70,31 +80,222 @@ function scheduleSave() {
   saveTimer = setTimeout(() => void flushSave(), 400);
 }
 
-export async function flushSave() {
+export function registerFlushHook(fn: () => void): () => void {
+  flushHooks.add(fn);
+  return () => flushHooks.delete(fn);
+}
+
+function runFlushHooks() {
+  for (const fn of [...flushHooks]) fn();
+}
+
+/** Brings everything typed so far into the story: pending hooks, an open edit, a mid-story draft. */
+export function settleEdit() {
+  runFlushHooks();
+  batch(() => {
+    saveEditIfChanged();
+    flushInsertDraft();
+  });
+}
+
+export function flushSave(): Promise<void> {
+  const run = saveChain.then(doFlush);
+  saveChain = run.catch(() => {});
+  return run;
+}
+
+async function doFlush() {
   clearTimeout(saveTimer);
   const id = storyId.value;
   if (!id || saveState.value !== 'pending') return;
   const s = story.value;
+  const text = serializeStory(s);
   try {
     const existing = await db.getStory(id);
-    await db.putStory({
-      id,
-      profileId: existing?.profileId ?? requireProfileId(),
-      title: s.title,
-      text: serializeStory(s),
-      lines: s.blocks.length,
-      createdAt: existing?.createdAt ?? Date.now(),
-      updatedAt: Date.now(),
-    });
-    if (story.value === s) saveState.value = 'saved';
+    if (!existing) {
+      // Deleted in another window. Never recreate it under its old id.
+      const owner = profileId.value;
+      if (!owner || !(await db.getProfile(owner))) {
+        saveState.value = 'error';
+        return;
+      }
+      await saveAsCopy(s, 'recovered');
+      return;
+    }
+    if (existing.updatedAt > knownUpdatedAt && existing.text !== text) {
+      // Another window saved a newer version: keep both instead of overwriting it.
+      await saveAsCopy(s, 'conflict');
+      return;
+    }
+    const now = Math.max(Date.now(), existing.updatedAt + 1);
+    await db.putStory({ ...existing, title: s.title, text, lines: s.blocks.length, updatedAt: now });
+    knownUpdatedAt = now;
+    clearJournal(id);
+    broadcast({ type: 'story-saved', id, updatedAt: now });
+    if (story.value === s && storyId.value === id) saveState.value = 'saved';
   } catch {
     saveState.value = 'error';
   }
 }
 
+async function saveAsCopy(s: Story, reason: 'conflict' | 'recovered') {
+  const oldId = storyId.value;
+  const owner = requireProfileId();
+  const id = newId();
+  const now = Date.now();
+  const title = `${s.title} (${reason === 'conflict' ? 'conflict copy' : 'recovered'})`;
+  const copy = { ...s, title };
+  await db.putStory({
+    id,
+    profileId: owner,
+    title,
+    text: serializeStory(copy),
+    lines: copy.blocks.length,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (oldId) clearJournal(oldId);
+  batch(() => {
+    storyId.value = id;
+    story.value = copy;
+    saveState.value = 'saved';
+  });
+  knownUpdatedAt = now;
+  go(storyPath(id), true);
+  showToast(
+    reason === 'conflict'
+      ? 'This story changed in another window. Your version was saved as a copy.'
+      : 'This story was deleted in another window. Your text was saved as a new story.',
+  );
+}
+
+// ------------------------------------------------- crash journal and drafts
+// IndexedDB writes started while the page is closing often never land, so
+// the latest text also goes to localStorage synchronously when the page hides.
+
+const JOURNAL = 'storyteller:journal:';
+const DRAFT = 'storyteller:draft:';
+
+function storageSet(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage full or blocked: the IndexedDB save is still attempted.
+  }
+}
+
+function storageGet<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storageRemove(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Nothing to remove.
+  }
+}
+
+interface Journal {
+  id: string;
+  profileId: string;
+  text: string;
+  at: number;
+}
+
+function clearJournal(id: string) {
+  storageRemove(JOURNAL + id);
+}
+
+function rememberDraft(id: string) {
+  const unsent = mode.value.type === 'new' ? { draft: draft.value, voice: voice.value } : pendingNew;
+  if (unsent && unsent.draft.trim()) storageSet(DRAFT + id, unsent);
+  else storageRemove(DRAFT + id);
+}
+
+function writeJournal() {
+  const id = storyId.value;
+  const owner = profileId.value;
+  if (!id || !owner) return;
+  if (saveState.value === 'pending') {
+    const entry: Journal = { id, profileId: owner, text: serializeStory(story.value), at: Date.now() };
+    storageSet(JOURNAL + id, entry);
+  }
+  rememberDraft(id);
+}
+
+/** Applies journals left by a page that closed before its last save landed. */
+export async function recoverJournals(owner: string) {
+  let keys: string[] = [];
+  try {
+    keys = Object.keys(localStorage).filter((k) => k.startsWith(JOURNAL));
+  } catch {
+    return;
+  }
+  for (const key of keys) {
+    const j = storageGet<Journal>(key);
+    if (!j || j.profileId !== owner) continue;
+    const record = await db.getStory(j.id);
+    if (record && record.profileId === owner && j.at > record.updatedAt && record.text !== j.text) {
+      const parsed = parseStory(j.text).story;
+      await db.putStory({ ...record, title: parsed.title, text: j.text, lines: parsed.blocks.length, updatedAt: j.at });
+    }
+    storageRemove(key);
+  }
+}
+
+function onPageHide() {
+  if (!storyId.value) return;
+  settleEdit();
+  writeJournal();
+  void flushSave();
+}
+
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') void flushSave();
+    if (document.visibilityState === 'hidden') onPageHide();
+  });
+  window.addEventListener('pagehide', onPageHide);
+}
+
+// Other windows: pick up their saves when this one has nothing unsaved.
+onBroadcast((msg) => {
+  const id = storyId.value;
+  if (!id) return;
+  if (msg.type === 'story-saved' && msg.id === id && msg.updatedAt > knownUpdatedAt) {
+    if (saveState.value === 'saved' && !isEditDirty() && !draft.value.trim()) void reloadOpenStory();
+  } else if (msg.type === 'story-deleted' && msg.id === id && saveState.value === 'saved') {
+    resetEditor();
+    go('/', true);
+    showToast('This story was deleted in another window.');
+  }
+});
+
+function isEditDirty(): boolean {
+  const m = mode.value;
+  if (m.type !== 'edit') return false;
+  const block = story.value.blocks[m.index];
+  return !!block && (draft.value !== draftOf(block) || voice.value !== voiceOf(block));
+}
+
+async function reloadOpenStory() {
+  const id = storyId.value;
+  if (!id) return;
+  const record = await db.getStory(id);
+  if (!record || storyId.value !== id || saveState.value !== 'saved') return;
+  const { story: s } = parseStory(record.text);
+  knownUpdatedAt = record.updatedAt;
+  batch(() => {
+    story.value = s;
+    history.clear();
+    syncHistory();
+    if (mode.value.type === 'edit') exitToNew(s.blocks.length);
+    else mode.value = { type: 'new', at: Math.min(mode.value.at, s.blocks.length) };
   });
 }
 
@@ -141,16 +342,17 @@ export async function renameStory(id: string, title: string) {
   if (!record) return;
   const { story: s } = parseStory(record.text);
   s.title = clean;
-  await db.putStory({ ...record, title: clean, text: serializeStory(s), updatedAt: Date.now() });
+  const now = Math.max(Date.now(), record.updatedAt + 1);
+  await db.putStory({ ...record, title: clean, text: serializeStory(s), updatedAt: now });
+  broadcast({ type: 'story-saved', id, updatedAt: now });
 }
 
 export async function deleteStory(id: string) {
-  if (storyId.value === id) {
-    clearTimeout(saveTimer);
-    saveState.value = 'saved';
-    storyId.value = null;
-  }
+  if (storyId.value === id) resetEditor();
+  clearJournal(id);
+  storageRemove(DRAFT + id);
   await db.deleteStory(id);
+  broadcast({ type: 'story-deleted', id });
 }
 
 export async function openStory(id: string): Promise<boolean> {
@@ -158,24 +360,59 @@ export async function openStory(id: string): Promise<boolean> {
   await flushSave();
   const record = await db.getStory(id);
   if (!record || record.profileId !== requireProfileId()) return false;
-  const { story: s } = parseStory(record.text);
+  const journal = storageGet<Journal>(JOURNAL + id);
+  const recovered = !!journal && journal.profileId === record.profileId && journal.at > record.updatedAt;
+  const text = recovered ? journal.text : record.text;
+  const { story: s } = parseStory(text);
+  const saved = storageGet<{ draft: string; voice: Voice }>(DRAFT + id);
+  const savedVoiceOk = !!saved && (saved.voice === NARRATION || s.characters.some((c) => c.id === saved.voice));
   batch(() => {
     storyId.value = id;
     story.value = s;
     history.clear();
     syncHistory();
     pendingNew = null;
-    draft.value = '';
+    draft.value = saved?.draft ?? '';
     mode.value = { type: 'new', at: s.blocks.length };
-    voice.value = s.blocks.length ? voiceAfter(s.blocks, s.blocks.length - 1, s.characters) : (s.characters[0]?.id ?? NARRATION);
-    saveState.value = 'saved';
+    if (saved && savedVoiceOk) voice.value = saved.voice;
+    else if (s.blocks.length) voice.value = voiceAfter(s.blocks, s.blocks.length - 1, s.characters);
+    else voice.value = s.characters[0]?.id ?? NARRATION;
+    saveState.value = recovered && text !== record.text ? 'pending' : 'saved';
   });
+  knownUpdatedAt = record.updatedAt;
+  if (saveState.value === 'pending') void flushSave();
+  else clearJournal(id);
   return true;
 }
 
-export async function closeStory() {
+/**
+ * Saves everything (an open edit, Text-tab typing, the unsent draft) and
+ * closes the story. With `onlyId`, does nothing unless that story is open.
+ */
+export async function closeStory(onlyId?: string) {
+  const id = storyId.value;
+  if (!id || (onlyId && id !== onlyId)) return;
+  settleEdit();
+  rememberDraft(id);
   await flushSave();
-  storyId.value = null;
+  if (storyId.value === id) resetEditor();
+}
+
+/** Clears all editor state, so nothing from one story or profile shows in the next. */
+export function resetEditor() {
+  clearTimeout(saveTimer);
+  batch(() => {
+    storyId.value = null;
+    story.value = emptyStory();
+    history.clear();
+    syncHistory();
+    pendingNew = null;
+    draft.value = '';
+    mode.value = { type: 'new', at: 0 };
+    voice.value = NARRATION;
+    saveState.value = 'saved';
+  });
+  knownUpdatedAt = 0;
 }
 
 // ---------------------------------------------------------------- composer
@@ -185,6 +422,13 @@ export function commit(sameVoice = false) {
   const m = mode.value;
   const s = story.value;
   const editing = m.type === 'edit' ? s.blocks[m.index] : undefined;
+
+  // Stepping through lines with Enter without changing them adds no undo steps.
+  if (editing && draft.value === draftOf(editing) && voice.value === voiceOf(editing)) {
+    navNext(false);
+    return;
+  }
+
   const composed = compose(draft.value, voice.value, s.characters, editing?.id);
 
   if (!composed.block) {
@@ -210,6 +454,9 @@ export function commit(sameVoice = false) {
     if (m.type === 'edit') {
       if (index + 1 < blocks.length) enterEdit(index + 1);
       else exitToNew(blocks.length, following);
+    } else if (index + 1 >= blocks.length && pendingNew) {
+      // An insert reached the end: bring back the line that was waiting there.
+      exitToNew(blocks.length, following);
     } else {
       mode.value = { type: 'new', at: index + 1 };
       voice.value = following;
@@ -231,14 +478,49 @@ function saveEditIfChanged() {
   setStory({ ...s, characters: composed.characters, blocks });
 }
 
+/**
+ * Text typed at an insertion point in the middle of the story is written as
+ * a line when you move away, just like an edited line. Returns how many
+ * blocks were inserted (0 or 1) so callers can shift indices.
+ */
+function flushInsertDraft(): number {
+  const m = mode.value;
+  const s = story.value;
+  if (m.type !== 'new' || m.at >= s.blocks.length || !draft.value.trim()) return 0;
+  const composed = compose(draft.value, voice.value, s.characters);
+  if (!composed.block) return 0;
+  const blocks = [...s.blocks];
+  blocks.splice(m.at, 0, composed.block);
+  batch(() => {
+    setStory({ ...s, characters: composed.characters, blocks });
+    draft.value = '';
+    mode.value = { type: 'new', at: m.at + 1 };
+  });
+  return 1;
+}
+
 export function enterEdit(index: number) {
   const block = story.value.blocks[index];
   if (!block) return;
   batch(() => {
-    if (mode.value.type === 'new') pendingNew = { draft: draft.value, voice: voice.value };
+    const m = mode.value;
+    // Only the line waiting at the end of the story is kept aside; a draft at
+    // a middle insertion point was already written by flushInsertDraft.
+    if (m.type === 'new' && (m.at >= story.value.blocks.length || !pendingNew)) {
+      pendingNew = { draft: draft.value, voice: voice.value };
+    }
     mode.value = { type: 'edit', index };
     draft.value = draftOf(block);
     voice.value = voiceOf(block);
+  });
+}
+
+/** Opens a line for editing from a tap, keeping any change to the current one. */
+export function selectLine(index: number) {
+  batch(() => {
+    saveEditIfChanged();
+    const shift = mode.value.type === 'new' && index >= mode.value.at ? flushInsertDraft() : 0;
+    enterEdit(index + shift);
   });
 }
 
@@ -258,6 +540,7 @@ function exitToNew(at: number, fallbackVoice?: Voice) {
 export function navPrev() {
   batch(() => {
     saveEditIfChanged();
+    flushInsertDraft();
     const m = mode.value;
     const target = m.type === 'edit' ? m.index - 1 : m.at - 1;
     if (target >= 0) enterEdit(target);
@@ -266,7 +549,10 @@ export function navPrev() {
 
 export function navNext(save = true) {
   batch(() => {
-    if (save) saveEditIfChanged();
+    if (save) {
+      saveEditIfChanged();
+      flushInsertDraft();
+    }
     const m = mode.value;
     const len = story.value.blocks.length;
     if (m.type === 'edit') {
@@ -281,8 +567,10 @@ export function navNext(save = true) {
 export function navEnd() {
   batch(() => {
     saveEditIfChanged();
-    if (mode.value.type === 'edit') exitToNew(story.value.blocks.length);
-    else mode.value = { type: 'new', at: story.value.blocks.length };
+    flushInsertDraft();
+    const len = story.value.blocks.length;
+    if (mode.value.type === 'edit' || pendingNew) exitToNew(len);
+    else mode.value = { type: 'new', at: len };
   });
 }
 
@@ -292,7 +580,7 @@ export function insertBelow() {
   batch(() => {
     saveEditIfChanged();
     const s = story.value;
-    pendingNew = null;
+    // pendingNew (the unsent line at the end) stays put and comes back at the end.
     mode.value = { type: 'new', at: m.index + 1 };
     draft.value = '';
     voice.value = voiceAfter(s.blocks, m.index, s.characters);
@@ -358,6 +646,7 @@ function restore(snap: Snapshot) {
     if (m.type === 'edit' && m.index < len) {
       mode.value = m;
       draft.value = draftOf(snap.story.blocks[m.index]);
+      voice.value = voiceOf(snap.story.blocks[m.index]);
     } else {
       if (mode.value.type === 'edit') draft.value = pendingNew?.draft ?? '';
       pendingNew = null;
@@ -408,7 +697,7 @@ export function changeCharacterId(from: string, to: string): string | null {
   const s = story.value;
   const next = to.trim();
   if (next === from) return null;
-  if (!/^[\p{L}\p{N}_-]+$/u.test(next)) return 'Use letters, numbers, - or _ only.';
+  if (!/^[\p{L}\p{M}\p{N}_-]+$/u.test(next)) return 'Use letters, numbers, - or _ only.';
   if (s.characters.some((c) => c.id.toLowerCase() === next.toLowerCase() && c.id !== from)) {
     return `@${next} is already used.`;
   }
@@ -433,9 +722,11 @@ export function moveCharacter(id: string, step: -1 | 1) {
 export function deleteCharacter(id: string): boolean {
   const s = story.value;
   if (countLines(s, id) > 0) return false;
+  const fallback = s.characters.find((c) => c.id !== id)?.id ?? NARRATION;
   batch(() => {
     setStory({ ...s, characters: s.characters.filter((c) => c.id !== id) });
-    if (voice.value === id) voice.value = s.characters.find((c) => c.id !== id)?.id ?? NARRATION;
+    if (voice.value === id) voice.value = fallback;
+    if (pendingNew?.voice === id) pendingNew = { ...pendingNew, voice: fallback };
   });
   return true;
 }
@@ -446,16 +737,21 @@ export function setTitle(title: string) {
   setStory({ ...story.value, title }, 'title');
 }
 
-/** Replaces the story from `.story` text (Text mode, Paste from AI). */
-export function replaceFromText(text: string, coalesceKey?: string) {
+/**
+ * Replaces the story from `.story` text (Text mode, Paste from AI). The
+ * unsent line in the composer is kept. Returns the story that was applied.
+ */
+export function replaceFromText(text: string, coalesceKey?: string): Story {
   const { story: parsed } = parseStory(text);
   batch(() => {
+    const m = mode.value;
+    const wasAtEnd = m.type === 'new' && m.at >= story.value.blocks.length;
     setStory(parsed, coalesceKey);
-    pendingNew = null;
-    draft.value = '';
-    mode.value = { type: 'new', at: parsed.blocks.length };
-    if (!parsed.characters.some((c) => c.id === voice.value) && voice.value !== NARRATION) {
-      voice.value = parsed.characters[0]?.id ?? NARRATION;
-    }
+    if (m.type === 'edit') exitToNew(parsed.blocks.length);
+    else mode.value = { type: 'new', at: wasAtEnd ? parsed.blocks.length : Math.min(m.at, parsed.blocks.length) };
+    const known = (v: Voice) => v === NARRATION || v === HEADING || v === NOTE || parsed.characters.some((c) => c.id === v);
+    if (!known(voice.value)) voice.value = parsed.characters[0]?.id ?? NARRATION;
+    if (pendingNew && !known(pendingNew.voice)) pendingNew = { ...pendingNew, voice: voice.value };
   });
+  return parsed;
 }

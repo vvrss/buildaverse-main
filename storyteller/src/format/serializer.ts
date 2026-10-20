@@ -1,6 +1,6 @@
 import type { Block, Story } from './types';
 
-const oneLine = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim();
+const oneLine = (s: string) => s.replace(/\s*[\n\u2028\u2029]\s*/g, ' ').trim();
 
 function withContinuation(prefix: string, text: string): string {
   const [first = '', ...rest] = text.split('\n');

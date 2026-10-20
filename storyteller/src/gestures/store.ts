@@ -1,13 +1,13 @@
 import { computed, signal } from '@preact/signals';
 import { type GestureRecord, type Point, db } from '../store/db';
 import { profileId, requireProfileId } from '../store/session';
-import { BUILTIN_GESTURES } from './defaults';
+import { BUILTIN_GESTURES, strokesOf } from './defaults';
 import { makeTemplates } from './recognizer';
 
 export const customGestures = signal<GestureRecord[]>([]);
 export const disabledBuiltins = signal<string[]>([]);
 
-const builtinTemplates = new Map(BUILTIN_GESTURES.map((g) => [g.id, makeTemplates(g.action, [g.stroke])]));
+const builtinTemplates = new Map(BUILTIN_GESTURES.map((g) => [g.id, makeTemplates(g.action, strokesOf(g))]));
 
 /** Every active template; the pad matches strokes against these. */
 export const templates = computed(() => [

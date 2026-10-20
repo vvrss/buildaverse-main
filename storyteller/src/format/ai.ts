@@ -19,7 +19,8 @@ export function storyForAi(storyText: string, request = ''): string {
 /** Pulls the story text out of an AI reply (fenced block, or from the first "---"). */
 export function extractStoryText(raw: string): string {
   const text = raw.replace(/\r\n?/g, '\n');
-  const fences = [...text.matchAll(/```[\w-]*[ \t]*\n([\s\S]*?)```/g)].map((m) => m[1]);
+  // Fences of ``` or ~~~ (three or more), with any info string ("story", " story", none).
+  const fences = [...text.matchAll(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^\1[ \t]*$/gm)].map((m) => m[2]);
   if (fences.length > 0) {
     const scored = fences
       .map((body) => ({ body, score: (body.match(/^\s*(@|>|#|---)/gm) ?? []).length }))
@@ -28,6 +29,11 @@ export function extractStoryText(raw: string): string {
   }
   const lines = text.split('\n');
   const headerAt = lines.findIndex((l) => l.trim() === '---');
-  if (headerAt > 0) return lines.slice(headerAt).join('\n');
+  if (headerAt > 0) {
+    // An unclosed fence after the story ends it; drop the chat that follows.
+    const rest = lines.slice(headerAt);
+    const end = rest.findIndex((l, i) => i > 0 && /^(`{3,}|~{3,})\s*$/.test(l));
+    return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+  }
   return text;
 }

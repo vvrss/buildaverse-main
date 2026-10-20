@@ -1,4 +1,5 @@
 import type { Block, Character } from '../format/types';
+import { tint } from '../ui/color';
 
 interface Props {
   block: Block;
@@ -41,7 +42,7 @@ export function LineView({ block, index, character, isLead, showName, selected, 
         <div
           class={`blk line${isLead ? ' lead' : ''}${showName ? ' first' : ''}${cls}`}
           data-index={index}
-          style={`--c:${character?.color ?? '#888'}`}
+          style={tint(character?.color)}
           onClick={select}
         >
           {showName && (

@@ -20,7 +20,7 @@ const HOST_EXTENSIONS = ['txt', 'json', 'md', 'html', 'pdf', 'csv', 'zip'];
 
 export type SaveOutcome = 'saved' | 'declined' | 'failed';
 
-export async function saveFile(filename: string, data: string, mime = 'text/plain'): Promise<SaveOutcome> {
+export async function saveFile(filename: string, data: string | Blob, mime = 'text/plain'): Promise<SaveOutcome> {
   const downloads = await hostDownloads;
   if (downloads) {
     const ext = filename.split('.').pop()?.toLowerCase() ?? '';
@@ -33,7 +33,8 @@ export async function saveFile(filename: string, data: string, mime = 'text/plai
     }
   }
   try {
-    const url = URL.createObjectURL(new Blob([data], { type: `${mime};charset=utf-8` }));
+    const blob = data instanceof Blob ? data : new Blob([data], { type: `${mime};charset=utf-8` });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -52,15 +53,22 @@ export async function printIsUnavailable(): Promise<boolean> {
   return (await hostDownloads) !== null;
 }
 
-/** Shares a file through the system share sheet where the device supports it. */
-export async function shareFile(filename: string, data: string, mime = 'text/plain'): Promise<boolean> {
+export type ShareOutcome = 'shared' | 'cancelled' | 'unsupported' | 'failed';
+
+/**
+ * Shares a file through the system share sheet where the device supports it.
+ * Browsers only share well-known file types, so other names get ".txt".
+ */
+export async function shareFile(filename: string, data: string | Blob, mime = 'text/plain'): Promise<ShareOutcome> {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  const name = ['txt', 'json', 'md', 'html', 'pdf', 'csv', 'png', 'jpg', 'jpeg', 'webp'].includes(ext) ? filename : `${filename}.txt`;
   try {
-    const file = new File([data], filename, { type: mime });
-    if (!navigator.canShare?.({ files: [file] })) return false;
-    await navigator.share({ files: [file], title: filename });
-    return true;
-  } catch {
-    return false;
+    const file = new File([data], name, { type: mime });
+    if (!navigator.canShare?.({ files: [file] })) return 'unsupported';
+    await navigator.share({ files: [file], title: name });
+    return 'shared';
+  } catch (err) {
+    return (err as DOMException)?.name === 'AbortError' ? 'cancelled' : 'failed';
   }
 }
 
@@ -86,5 +94,16 @@ export function printHtml(html: string) {
   document.body.appendChild(frame);
 }
 
+/** A file name from a title: keeps letters with their marks (Hindi, Thai...), digits, dots, - and _. */
 export const safeFilename = (title: string) =>
-  title.replace(/[^\p{L}\p{N} _-]+/gu, '').trim().replace(/\s+/g, ' ').slice(0, 80) || 'story';
+  [
+    ...title
+      .normalize('NFC')
+      .replace(/[^\p{L}\p{M}\p{N} ._-]+/gu, '')
+      .replace(/^[.\s]+/, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  ]
+    .slice(0, 80)
+    .join('')
+    .replace(/[.\s]+$/, '') || 'story';

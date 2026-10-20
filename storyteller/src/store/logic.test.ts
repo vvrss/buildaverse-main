@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Block, Character } from '../format/types';
 import { readPrefix } from '../shortcuts/prefixes';
-import { HEADING, NARRATION, NOTE, compose, cycleVoice, voiceAfter } from './logic';
+import { HEADING, NARRATION, NOTE, compose, cycleVoice, draftOf, voiceAfter, voiceOf } from './logic';
 
 const cast: Character[] = [
   { id: 'ana', name: 'Ana', color: '#111111' },
@@ -80,13 +80,50 @@ describe('typed prefixes', () => {
     expect(state.type === 'mention' && state.matches.map((c) => c.id)).toEqual(['mira']);
   });
 
-  it('switches speaker when a unique @prefix is followed by a space', () => {
-    expect(readPrefix('@mi hello', cast)).toEqual({ type: 'switch', speaker: 'mira', rest: 'hello' });
+  it('switches speaker only on an exact id or name followed by a space', () => {
+    expect(readPrefix('@mira hello', cast)).toEqual({ type: 'switch', speaker: 'mira', rest: 'hello' });
+    expect(readPrefix('@Mira: hello', cast)).toEqual({ type: 'switch', speaker: 'mira', rest: 'hello' });
+    // A prefix of an existing name stays text, so sending it creates that character.
+    expect(readPrefix('@mi hello', cast)).toEqual({ type: 'none' });
     expect(readPrefix('@zed hello', cast)).toEqual({ type: 'none' });
+  });
+
+  it('puts the exact match first in @ suggestions', () => {
+    const withAl = [...cast, { id: 'al', name: 'Al', color: '#444444' }, { id: 'alice', name: 'Alice', color: '#555555' }];
+    const state = readPrefix('@al', withAl);
+    expect(state.type === 'mention' && state.matches.map((c) => c.id)).toEqual(['al', 'alice']);
   });
 
   it('runs /commands on space', () => {
     expect(readPrefix('/u ', cast)).toEqual({ type: 'run', action: 'history.undo' });
     expect(readPrefix('/u', cast)).toMatchObject({ type: 'command' });
+  });
+});
+
+describe('editing keeps a block what it is', () => {
+  const blocks: Block[] = [
+    { kind: 'note', id: 'n1', text: '@ana should sound tired here' },
+    { kind: 'narration', id: 'n2', text: '> quoted, # not a heading' },
+    { kind: 'line', id: 'l1', speaker: 'ana', text: '@tom look out' },
+    { kind: 'line', id: 'l2', speaker: 'tom', text: '(aside) not a direction' },
+    { kind: 'heading', id: 'h1', text: '// Part two' },
+  ];
+  for (const block of blocks) {
+    it(`round-trips a ${block.kind} that starts like a prefix`, () => {
+      const { block: back } = compose(draftOf(block), voiceOf(block), cast, block.id);
+      expect(back).toEqual(block);
+    });
+  }
+
+  it('accepts the file format colon after a direction', () => {
+    expect(compose('(whispering): Stay still.', 'tom', cast, 'x').block).toEqual({
+      kind: 'line', id: 'x', speaker: 'tom', direction: 'whispering', text: 'Stay still.',
+    });
+  });
+
+  it('matches typed names regardless of Unicode normalization', () => {
+    const korean = [{ id: '민수', name: '민수', color: '#111111' }];
+    const decomposed = '민수'.normalize('NFD');
+    expect(compose(`@${decomposed} 안녕`, NARRATION, korean, 'x').block).toMatchObject({ speaker: '민수' });
   });
 });

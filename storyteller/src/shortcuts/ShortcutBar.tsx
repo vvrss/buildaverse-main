@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'preact/hooks';
 import { ChevronLeft, ChevronRight, Signature, Undo2 } from 'lucide-preact';
 import { haptic, settings } from '../store/settings';
-import { HEADING, NARRATION, NOTE, voiceCycle } from '../store/logic';
+import { HEADING, IMAGE, NARRATION, NOTE, voiceCycle } from '../store/logic';
+import { tint } from '../ui/color';
 import { historyState, mode, setVoice, story, stepVoice, voice } from '../store/storyStore';
 import { focusComposer, gesturePadOpen } from '../store/ui';
 import { runAction } from './actions';
@@ -15,6 +16,7 @@ function voiceLabel(v: string, names: Map<string, string>): string {
   if (v === NARRATION) return 'Narration';
   if (v === HEADING) return 'Heading';
   if (v === NOTE) return 'Note';
+  if (v === IMAGE) return 'Picture';
   return names.get(v) ?? v;
 }
 
@@ -26,6 +28,7 @@ function voiceLabel(v: string, names: Map<string, string>): string {
 export function ShortcutBar() {
   const zone = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x0: number; y0: number; lastX: number; moved: boolean; target: string | null } | null>(null);
+  const lastSwipe = useRef(0);
 
   const characters = story.value.characters;
   const names = new Map(characters.map((c) => [c.id, c.name]));
@@ -44,7 +47,6 @@ export function ShortcutBar() {
   const onDown = (e: PointerEvent) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>('[data-voice]')?.dataset.voice ?? null;
     drag.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lastX: e.clientX, moved: false, target };
-    zone.current?.setPointerCapture(e.pointerId);
   };
 
   const onMove = (e: PointerEvent) => {
@@ -54,10 +56,13 @@ export function ShortcutBar() {
     const dy = e.clientY - d.y0;
     if (!d.moved && dy < -SWIPE_UP_PX && Math.abs(dy) > Math.abs(e.clientX - d.x0) * 1.5) {
       d.moved = true;
+      zone.current?.setPointerCapture(e.pointerId);
       gesturePadOpen.value = true;
       return;
     }
     if (Math.abs(dx) >= STEP_PX && Math.abs(dx) > Math.abs(dy) * 0.6) {
+      // Capture only once it is really a swipe, so plain taps still click the chip.
+      if (!d.moved) zone.current?.setPointerCapture(e.pointerId);
       // Swipe left = next, like flicking a carousel forward (unless reversed in Settings).
       const forward = settings.value.invertSwipe ? dx > 0 : dx < 0;
       stepVoice(forward ? 1 : -1);
@@ -71,9 +76,9 @@ export function ShortcutBar() {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
-    const travel = Math.hypot(e.clientX - d.x0, e.clientY - d.y0);
-    if (!d.moved && travel < 12 && d.target) setVoice(d.target);
-    focusComposer();
+    if (d.moved) lastSwipe.current = performance.now();
+    // Taps are handled by each chip's click, which also serves keyboards and screen readers.
+    if (d.moved) focusComposer();
   };
 
   const act = (id: string) => () => {
@@ -101,17 +106,23 @@ export function ShortcutBar() {
         onPointerCancel={onUp}
       >
         {chips.map((v) => (
-          <span
+          <button
+            type="button"
             key={v}
-            class={`chip${v === current ? ' active' : ''}${v === NARRATION || v === HEADING || v === NOTE ? ' meta' : ''}`}
+            class={`chip${v === current ? ' active' : ''}${v === NARRATION || v === HEADING || v === NOTE || v === IMAGE ? ' meta' : ''}`}
             data-voice={v}
             data-active={v === current ? 'true' : 'false'}
-            style={colors.has(v) ? { '--c': colors.get(v) } : undefined}
-            role="button"
+            style={colors.has(v) ? tint(colors.get(v)) : undefined}
             aria-pressed={v === current}
+            onClick={() => {
+              // A swipe that started on this chip is not also a tap.
+              if (performance.now() - lastSwipe.current < 400) return;
+              setVoice(v);
+              focusComposer();
+            }}
           >
             {voiceLabel(v, names)}
-          </span>
+          </button>
         ))}
       </div>
       <button type="button" class="bar-btn" aria-label="Next line" disabled={!canForward} onClick={act('nav.next')}>

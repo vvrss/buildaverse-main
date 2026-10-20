@@ -1,34 +1,46 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { Delete } from 'lucide-preact';
 
 interface Props {
   /** Called with the 4 digits; return an error to show, or null to accept. */
   onComplete: (pin: string) => Promise<string | null> | string | null;
   label: string;
+  /** A message to show from the start, e.g. after a mismatch in a previous step. */
+  message?: string | null;
 }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'];
 
 /** A 4-digit PIN entry with an on-screen keypad and keyboard support. */
-export function PinPad({ onComplete, label }: Props) {
-  const [pin, setPin] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+export function PinPad({ onComplete, label, message = null }: Props) {
+  const [pin, setPinState] = useState('');
+  const [error, setError] = useState<string | null>(message);
+  // Refs hold the live values, so keys typed faster than a render are all counted
+  // and a full PIN is submitted exactly once.
+  const pinRef = useRef('');
+  const busyRef = useRef(false);
+  const completeRef = useRef(onComplete);
+  completeRef.current = onComplete;
+
+  const setPin = (value: string) => {
+    pinRef.current = value;
+    setPinState(value);
+  };
 
   const press = async (key: string) => {
-    if (busy) return;
+    if (busyRef.current) return;
     if (key === 'del') {
-      setPin((p) => p.slice(0, -1));
+      setPin(pinRef.current.slice(0, -1));
       return;
     }
-    if (!/^\d$/.test(key) || pin.length >= 4) return;
-    const next = pin + key;
+    if (!/^\d$/.test(key) || pinRef.current.length >= 4) return;
+    const next = pinRef.current + key;
     setPin(next);
     setError(null);
     if (next.length === 4) {
-      setBusy(true);
-      const err = await onComplete(next);
-      setBusy(false);
+      busyRef.current = true;
+      const err = await completeRef.current(next);
+      busyRef.current = false;
       setPin('');
       if (err) {
         setError(err);
@@ -39,12 +51,13 @@ export function PinPad({ onComplete, label }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (/^\d$/.test(e.key)) void press(e.key);
       else if (e.key === 'Backspace') void press('del');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+  }, []);
 
   return (
     <div class="pinpad">

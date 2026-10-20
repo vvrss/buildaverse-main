@@ -1,5 +1,5 @@
 import { X } from 'lucide-preact';
-import { describeAction, runAction } from '../shortcuts/actions';
+import { canRun, describeAction, runAction } from '../shortcuts/actions';
 import { GESTURE_THRESHOLDS, haptic, settings } from '../store/settings';
 import { showToast } from '../store/storyStore';
 import { gesturePadOpen } from '../store/ui';
@@ -13,13 +13,19 @@ export function GesturePad() {
   if (!gesturePadOpen.value) return null;
 
   const onStroke = (points: { x: number; y: number }[]) => {
-    const match = recognize(points, templates.value, GESTURE_THRESHOLDS[settings.value.gestureSensitivity]);
+    // Gestures for characters that aren't in this story can't match by accident.
+    const usable = templates.value.filter((t) => canRun(t.action));
+    const match = recognize(points, usable, GESTURE_THRESHOLDS[settings.value.gestureSensitivity]);
     if (!match) {
       showToast('Not recognized. Draw again, or tap to close');
       return;
     }
     const label = runAction(match.action);
-    showToast(`✓ ${label ?? describeAction(match.action)}`);
+    if (!label) {
+      showToast(`${describeAction(match.action)} isn't in this story`);
+      return;
+    }
+    showToast(`✓ ${label}`);
     haptic(8);
   };
 

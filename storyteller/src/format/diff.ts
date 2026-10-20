@@ -4,18 +4,23 @@ export interface DiffSummary {
   ops: DiffOp[];
   added: number;
   removed: number;
-  /** True when the inputs were too large for a line-by-line diff. */
+  /** True when the two texts differed too much for a line-by-line comparison. */
   truncated: boolean;
 }
 
-const MAX_CELLS = 4_000_000;
+/** Edit-distance budget: beyond this many changed lines the diff gives up. */
+const MAX_EDITS = 4000;
 
-/** Line-based LCS diff, used to preview AI edits before they replace a story. */
+/**
+ * Line-based diff (Myers' O(ND) algorithm), used to preview AI edits before
+ * they replace a story. It stays fast for long stories with few changes,
+ * which is the normal case for an AI edit.
+ */
 export function diffLines(before: string, after: string): DiffSummary {
   const a = before.replace(/\n$/, '').split('\n');
   const b = after.replace(/\n$/, '').split('\n');
 
-  // Trim the common prefix and suffix so typical edits stay cheap.
+  // Trim the common prefix and suffix first.
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
   let endA = a.length;
@@ -29,7 +34,8 @@ export function diffLines(before: string, after: string): DiffSummary {
   const head: DiffOp[] = a.slice(0, start).map((text) => ({ type: 'same', text }));
   const tail: DiffOp[] = a.slice(endA).map((text) => ({ type: 'same', text }));
 
-  if (midA.length * midB.length > MAX_CELLS) {
+  const mid = myers(midA, midB);
+  if (!mid) {
     const ops: DiffOp[] = [
       ...head,
       ...midA.map((text): DiffOp => ({ type: 'del', text })),
@@ -38,41 +44,70 @@ export function diffLines(before: string, after: string): DiffSummary {
     ];
     return { ops, added: midB.length, removed: midA.length, truncated: true };
   }
-
-  const n = midA.length;
-  const m = midB.length;
-  const table = new Uint32Array((n + 1) * (m + 1));
-  for (let x = n - 1; x >= 0; x -= 1) {
-    for (let y = m - 1; y >= 0; y -= 1) {
-      table[x * (m + 1) + y] =
-        midA[x] === midB[y]
-          ? table[(x + 1) * (m + 1) + y + 1] + 1
-          : Math.max(table[(x + 1) * (m + 1) + y], table[x * (m + 1) + y + 1]);
-    }
-  }
-
-  const mid: DiffOp[] = [];
-  let x = 0;
-  let y = 0;
-  let added = 0;
-  let removed = 0;
-  while (x < n && y < m) {
-    if (midA[x] === midB[y]) {
-      mid.push({ type: 'same', text: midA[x] });
-      x += 1;
-      y += 1;
-    } else if (table[(x + 1) * (m + 1) + y] >= table[x * (m + 1) + y + 1]) {
-      mid.push({ type: 'del', text: midA[x] });
-      x += 1;
-      removed += 1;
-    } else {
-      mid.push({ type: 'add', text: midB[y] });
-      y += 1;
-      added += 1;
-    }
-  }
-  for (; x < n; x += 1, removed += 1) mid.push({ type: 'del', text: midA[x] });
-  for (; y < m; y += 1, added += 1) mid.push({ type: 'add', text: midB[y] });
-
+  const added = mid.filter((o) => o.type === 'add').length;
+  const removed = mid.filter((o) => o.type === 'del').length;
   return { ops: [...head, ...mid, ...tail], added, removed, truncated: false };
+}
+
+/** Shortest edit script between two line arrays, or null past the edit budget. */
+function myers(a: string[], b: string[]): DiffOp[] | null {
+  const n = a.length;
+  const m = b.length;
+  if (n === 0) return b.map((text) => ({ type: 'add', text }));
+  if (m === 0) return a.map((text) => ({ type: 'del', text }));
+  const max = Math.min(n + m, MAX_EDITS);
+  const offset = max + 1;
+  let v = new Int32Array(2 * max + 3);
+  const trace: Int32Array[] = [];
+
+  for (let d = 0; d <= max; d += 1) {
+    trace.push(v.slice());
+    const next = v;
+    for (let k = -d; k <= d; k += 2) {
+      let x =
+        k === -d || (k !== d && next[offset + k - 1] < next[offset + k + 1])
+          ? next[offset + k + 1]
+          : next[offset + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x += 1;
+        y += 1;
+      }
+      next[offset + k] = x;
+      if (x >= n && y >= m) return backtrack(trace, a, b, offset, d);
+    }
+    v = next;
+  }
+  return null;
+}
+
+function backtrack(trace: Int32Array[], a: string[], b: string[], offset: number, dEnd: number): DiffOp[] {
+  const ops: DiffOp[] = [];
+  let x = a.length;
+  let y = b.length;
+  for (let d = dEnd; d > 0; d -= 1) {
+    const v = trace[d];
+    const k = x - y;
+    const prevK = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
+    const prevX = v[offset + prevK];
+    const prevY = prevX - prevK;
+    while (x > prevX && y > prevY) {
+      ops.push({ type: 'same', text: a[x - 1] });
+      x -= 1;
+      y -= 1;
+    }
+    if (x === prevX) {
+      ops.push({ type: 'add', text: b[y - 1] });
+      y -= 1;
+    } else {
+      ops.push({ type: 'del', text: a[x - 1] });
+      x -= 1;
+    }
+  }
+  while (x > 0 && y > 0) {
+    ops.push({ type: 'same', text: a[x - 1] });
+    x -= 1;
+    y -= 1;
+  }
+  return ops.reverse();
 }

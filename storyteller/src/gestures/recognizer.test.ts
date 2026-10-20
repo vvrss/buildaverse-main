@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Point } from '../store/db';
-import { BUILTIN_GESTURES } from './defaults';
+import { BUILTIN_GESTURES, strokesOf } from './defaults';
 import { makeTemplates, rank, recognize } from './recognizer';
 
-const templates = BUILTIN_GESTURES.flatMap((g) => makeTemplates(g.action, [g.stroke]));
+const templates = BUILTIN_GESTURES.flatMap((g) => makeTemplates(g.action, strokesOf(g)));
 const actionOf = (symbol: string) => BUILTIN_GESTURES.find((g) => g.symbol === symbol)!.action;
 
 /** Deterministic pseudo-random numbers, so noisy strokes are reproducible. */
@@ -79,5 +79,61 @@ describe('gesture recognizer', () => {
     expect(recognize(humanize(letterA, { seed: 99, angle: -0.1 }), all)?.action).toBe('voice.set:ana');
     // Built-ins still win for their own shapes.
     expect(recognize(humanize(BUILTIN_GESTURES[2].stroke, { seed: 5 }), all)?.action).toBe(actionOf('Z'));
+  });
+});
+
+describe('gesture recognizer edge cases', () => {
+  const circle = (startDeg: number, dir: 1 | -1): Point[] =>
+    Array.from({ length: 41 }, (_, i) => {
+      const a = -Math.PI / 2 + (startDeg * Math.PI) / 180 + dir * (i / 40) * Math.PI * 1.95;
+      return { x: 50 + 50 * Math.cos(a), y: 50 + 50 * Math.sin(a) };
+    });
+
+  it('recognizes a circle started anywhere, in either direction', () => {
+    for (const start of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      for (const dir of [1, -1] as const) {
+        expect(recognize(humanize(circle(start, dir), { seed: start + dir }), templates)?.action, `${start} ${dir}`).toBe(
+          actionOf('○'),
+        );
+      }
+    }
+  });
+
+  it('recognizes a heading line drawn at a slant, and narrow < >', () => {
+    for (const deg of [0, 10, 17, 20, 22]) {
+      const line = humanize([{ x: 0, y: 50 }, { x: 100, y: 50 }], { angle: (deg * Math.PI) / 180 });
+      expect(recognize(line, templates)?.action, `${deg}°`).toBe(actionOf('—'));
+    }
+    for (const w of [20, 28]) {
+      const lt = humanize([{ x: 50 + w / 2, y: 0 }, { x: 50 - w / 2, y: 50 }, { x: 50 + w / 2, y: 100 }], { jitter: 2 });
+      expect(recognize(lt, templates)?.action, `<${w}`).toBe(actionOf('<'));
+    }
+  });
+
+  it('keeps rotated, noisy Z strokes', () => {
+    for (const angle of [-0.2, 0.2]) {
+      expect(recognize(humanize(BUILTIN_GESTURES[2].stroke, { scale: 2, angle, jitter: 5, seed: 42 }), templates)?.action).toBe(
+        actionOf('Z'),
+      );
+    }
+  });
+
+  it('ignores look-alike scribbles at the default strictness', () => {
+    const shapes: Record<string, Point[]> = {
+      U: [{ x: 0, y: 0 }, { x: 0, y: 80 }, { x: 20, y: 100 }, { x: 80, y: 100 }, { x: 100, y: 80 }, { x: 100, y: 0 }],
+      seven: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 30, y: 100 }],
+      check: [{ x: 0, y: 60 }, { x: 35, y: 100 }, { x: 100, y: 0 }],
+      L: [{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }],
+      triangle: [{ x: 50, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 50, y: 0 }],
+      caret: [{ x: 0, y: 100 }, { x: 50, y: 0 }, { x: 100, y: 100 }],
+    };
+    for (const [name, pts] of Object.entries(shapes)) {
+      expect(recognize(humanize(pts, { seed: 7 }), templates), name).toBeNull();
+    }
+  });
+
+  it('survives degenerate input', () => {
+    expect(rank([{ x: 5, y: 5 }, { x: 5, y: 5 }, { x: 5, y: 5 }], templates)).toEqual([]);
+    expect(rank([{ x: NaN, y: 1 }, { x: 0, y: 0 }, { x: 200, y: 0 }], templates)[0]?.action).toBe(actionOf('—'));
   });
 });

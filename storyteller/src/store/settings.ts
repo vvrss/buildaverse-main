@@ -30,9 +30,11 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const GESTURE_THRESHOLDS: Record<Settings['gestureSensitivity'], number> = {
-  strict: 0.84,
-  normal: 0.78,
-  relaxed: 0.72,
+  // Built-in gestures drawn by hand score about 0.945-0.99. Look-alikes such as
+  // a "7", "U", "S" or "C" score up to about 0.9, so normal sits above them.
+  strict: 0.95,
+  normal: 0.92,
+  relaxed: 0.88,
 };
 
 const TEXT_SCALE: Record<Settings['textSize'], number> = { small: 0.92, medium: 1, large: 1.12 };
@@ -46,9 +48,25 @@ export async function loadSettings(profileId: string) {
   settings.value = { ...DEFAULT_SETTINGS, ...saved };
 }
 
+/** Signed out: keep the look (theme, text size) but nothing else of the last profile. */
 export function resetSettingsView() {
   owner = null;
-  settings.value = DEFAULT_SETTINGS;
+  const { theme, textSize } = settings.value;
+  settings.value = { ...DEFAULT_SETTINGS, theme, textSize };
+}
+
+/**
+ * Shows the lock screen and profile picker in a profile's own theme and text
+ * size, before it is unlocked. Only those two values are read.
+ */
+export async function previewAppearance(profileId: string) {
+  if (owner) return;
+  const saved = await db.getSetting<Partial<Settings>>(profileId, 'settings', {});
+  settings.value = {
+    ...DEFAULT_SETTINGS,
+    theme: saved.theme ?? DEFAULT_SETTINGS.theme,
+    textSize: saved.textSize ?? DEFAULT_SETTINGS.textSize,
+  };
 }
 
 export function updateSettings(patch: Partial<Settings>) {

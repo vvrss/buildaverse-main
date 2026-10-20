@@ -11,17 +11,29 @@ export interface ScriptOptions {
 
 const names = (story: Story) => new Map(story.characters.map((c) => [c.id, c.name]));
 
+/** Escapes Markdown syntax inside user text, so it reads exactly as written. */
+export function mdEscape(text: string): string {
+  return text.replace(/[\\`*_[\]<>|~]/g, '\\$&');
+}
+
+/** Escapes one line, including markers that only mean something at the start of a line. */
+function mdLine(line: string): string {
+  return mdEscape(line).replace(/^(\s*)([#>+=-]|\d+[.)])/, '$1\\$2');
+}
+
+const mdText = (text: string) => text.split('\n').map(mdLine).join('  \n');
+
 export function toScript(story: Story, { notes = false }: ScriptOptions = {}): string {
   const who = names(story);
-  const cast = story.characters.map((c) => c.name).join(', ');
-  const out: string[] = [`# ${story.title}`, ''];
+  const cast = story.characters.map((c) => mdEscape(c.name)).join(', ');
+  const out: string[] = [`# ${mdEscape(story.title)}`, ''];
   if (cast) out.push(`*Cast: ${cast}*`, '');
 
   for (const b of story.blocks) {
-    const text = b.text.split('\n').join('  \n');
+    const text = mdText(b.text);
     switch (b.kind) {
       case 'heading':
-        out.push('', `## ${b.text}`, '');
+        out.push('', `## ${mdEscape(b.text)}`, '');
         break;
       case 'narration':
         out.push(`*${text}*`, '');
@@ -30,8 +42,8 @@ export function toScript(story: Story, { notes = false }: ScriptOptions = {}): s
         if (notes) out.push(`> Note: ${text}`, '');
         break;
       case 'line': {
-        const name = (who.get(b.speaker) ?? b.speaker).toUpperCase();
-        const dir = b.direction ? ` *(${b.direction})*` : '';
+        const name = mdEscape((who.get(b.speaker) ?? b.speaker).toUpperCase());
+        const dir = b.direction ? ` *(${mdEscape(b.direction)})*` : '';
         out.push(`**${name}**${dir}: ${text}`, '');
       }
     }

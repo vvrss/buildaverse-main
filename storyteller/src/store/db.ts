@@ -1,3 +1,5 @@
+import { signal } from '@preact/signals';
+
 /**
  * Minimal IndexedDB wrapper. Falls back to memory (with `persistent` false)
  * when IndexedDB is unavailable, e.g. some private browsing modes.
@@ -66,9 +68,16 @@ const memory: Record<StoreName, Map<string, unknown>> = {
 };
 export let persistent = true;
 
+/**
+ * "blocked": another window still has the old database open, so the upgrade
+ * waits (nothing falls back to memory). "stale": a newer version upgraded
+ * the database from another window, so this one must reload.
+ */
+export const dbStatus = signal<'ok' | 'blocked' | 'stale'>('ok');
+
 function open(): Promise<IDBDatabase | null> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve) => {
+  dbPromise = new Promise((resolve, reject) => {
     try {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
@@ -78,14 +87,32 @@ function open(): Promise<IDBDatabase | null> {
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
         if (!db.objectStoreNames.contains('profiles')) db.createObjectStore('profiles', { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        dbStatus.value = 'ok';
+        // Let a newer version in another window upgrade instead of blocking it.
+        db.onversionchange = () => {
+          db.close();
+          dbStatus.value = 'stale';
+          dbPromise = Promise.reject(new Error('The database was upgraded in another window. Reload.'));
+          dbPromise.catch(() => {});
+        };
+        resolve(db);
+      };
       req.onerror = () => {
+        if (req.error?.name === 'VersionError') {
+          // A newer build already upgraded the database: never write to memory instead.
+          dbStatus.value = 'stale';
+          reject(req.error);
+          return;
+        }
         persistent = false;
         resolve(null);
       };
+      // Another window holds the old version open. Keep waiting; the request
+      // completes as soon as that window closes or reloads.
       req.onblocked = () => {
-        persistent = false;
-        resolve(null);
+        dbStatus.value = 'blocked';
       };
     } catch {
       persistent = false;

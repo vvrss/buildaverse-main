@@ -5,6 +5,7 @@ import {
   newBlockId,
   nextColor,
   normalizeText,
+  sameId,
   slugify,
   uniqueId,
 } from '../format/types';
@@ -18,8 +19,10 @@ export type Voice = string;
 export const NARRATION = '>';
 export const HEADING = '#';
 export const NOTE = '//';
+/** Editing a picture's caption. Never part of the swipe cycle. */
+export const IMAGE = '!';
 
-export const isSpeaker = (v: Voice) => v !== NARRATION && v !== HEADING && v !== NOTE;
+export const isSpeaker = (v: Voice) => v !== NARRATION && v !== HEADING && v !== NOTE && v !== IMAGE;
 
 /** Order used by swipes, Tab and the chip bar. */
 export function voiceCycle(characters: Character[]): Voice[] {
@@ -83,10 +86,27 @@ export function voiceOf(block: Block): Voice {
   }
 }
 
-/** Text shown in the composer when a block is opened for editing. */
+/** Text that `compose` would read as a prefix (speaker, kind or picture). */
+const PREFIX_LIKE = /^(@[\p{L}\p{M}\p{N}_-]|\/\/|>|#+\s|!\[)/u;
+
+/**
+ * Text shown in the composer when a block is opened for editing. Text that
+ * itself starts like a prefix gets the block's own marker in front, so
+ * sending it back can never change the block's kind or speaker.
+ */
 export function draftOf(block: Block): string {
-  if (block.kind === 'line' && block.direction) return `(${block.direction}) ${block.text}`;
-  return block.text;
+  switch (block.kind) {
+    case 'line':
+      if (block.direction) return `(${block.direction}) ${block.text}`;
+      if (block.text.startsWith('(')) return `() ${block.text}`;
+      return PREFIX_LIKE.test(block.text) ? `@${block.speaker}: ${block.text}` : block.text;
+    case 'narration':
+      return PREFIX_LIKE.test(block.text) ? `> ${block.text}` : block.text;
+    case 'note':
+      return PREFIX_LIKE.test(block.text) ? `// ${block.text}` : block.text;
+    case 'heading':
+      return PREFIX_LIKE.test(block.text) ? `# ${block.text}` : block.text;
+  }
 }
 
 export interface Composed {
@@ -106,9 +126,9 @@ export function compose(draft: string, voice: Voice, characters: Character[], id
   let v = voice;
   let cast = characters;
 
-  const at = /^@([\p{L}\p{N}_-]+)\s*:?\s*/u.exec(text);
+  const at = /^@([\p{L}\p{M}\p{N}_-]+)\s*:?\s*/u.exec(text);
   if (at) {
-    const known = cast.find((c) => c.id.toLowerCase() === at[1].toLowerCase());
+    const known = cast.find((c) => sameId(c.id, at[1]));
     if (known) v = known.id;
     else {
       const name = at[1].charAt(0).toUpperCase() + at[1].slice(1);
@@ -129,7 +149,8 @@ export function compose(draft: string, voice: Voice, characters: Character[], id
   }
 
   let direction: string | undefined;
-  const dir = /^\s*\(([^)]*)\)\s*/.exec(text);
+  // "(whispering) text" or, as in the file format, "(whispering): text".
+  const dir = /^\s*\(([^)]*)\)\s*:?\s*/.exec(text);
   if (dir && isSpeaker(v)) {
     direction = dir[1].trim() || undefined;
     text = text.slice(dir[0].length);

@@ -144,3 +144,48 @@ describe('diffLines', () => {
     expect(d.ops.map((o) => o.type)).toEqual(['same', 'del', 'add', 'same', 'add']);
   });
 });
+
+describe('format edge cases from the review', () => {
+  it('treats U+2028 and U+2029 as line breaks', () => {
+    const { story, issues } = parseStory('@ana: Hello world > Rain.\n');
+    expect(issues.filter((i) => i.severity === 'error')).toEqual([]);
+    expect(withoutIds(story).blocks).toEqual([
+      { kind: 'line', speaker: 'ana', text: 'Hello' },
+      { kind: 'narration', text: 'world' },
+      { kind: 'narration', text: 'Rain.' },
+    ]);
+  });
+
+  it('keeps Korean, Japanese and Hindi ids composed, so typed names match', async () => {
+    const { slugify } = await import('./types');
+    expect(slugify('민수')).toBe('민수'.normalize('NFC'));
+    expect(slugify('ガク')).toBe('ガク');
+    expect(slugify('सीता')).toBe('सीता');
+    expect(slugify('Zoé')).toBe('zoe');
+    const text = `---\ncharacters:\n  ${'민수'.normalize('NFD')}: 민수  #111111\n---\n@민수: 뭐?\n`;
+    const { story, issues } = parseStory(text);
+    expect(issues).toEqual([]);
+    expect(story.characters).toHaveLength(1);
+  });
+
+  it('reads fences with a space or tildes', () => {
+    expect(extractStoryText('Here:\n``` story\n@a: hi\n```\nbye').trim()).toBe('@a: hi');
+    expect(extractStoryText('Here:\n~~~story\n@a: hi\n~~~\nbye').trim()).toBe('@a: hi');
+  });
+});
+
+describe('diffLines on long stories', () => {
+  it('stays line-by-line for a few edits in a long text', () => {
+    const lines = Array.from({ length: 6000 }, (_, i) => `@a: line ${i}`);
+    const edited = [...lines];
+    edited[100] = '@a: changed';
+    edited.splice(4000, 0, '> inserted');
+    edited.splice(5000, 1);
+    const d = diffLines(lines.join('\n'), edited.join('\n'));
+    expect(d.truncated).toBe(false);
+    expect(d.added).toBe(2);
+    expect(d.removed).toBe(2);
+    const rebuilt = d.ops.filter((o) => o.type !== 'del').map((o) => o.text);
+    expect(rebuilt).toEqual(edited);
+  });
+});

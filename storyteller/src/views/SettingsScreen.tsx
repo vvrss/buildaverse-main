@@ -16,7 +16,7 @@ import { db } from '../store/db';
 import { currentProfile } from '../store/profile';
 import { type Settings, settings, updateSettings } from '../store/settings';
 import { showToast } from '../store/storyStore';
-import { Avatar, Group, Row, Segmented, Switch } from '../ui/controls';
+import { Avatar, FilePicker, Group, Row, Segmented, Switch } from '../ui/controls';
 import { Sheet, closeSheet, showSheet } from '../ui/overlay';
 import { install, installPrompt, isIos, isStandalone, reloadToUpdate, updateReady } from '../ui/pwa';
 
@@ -35,7 +35,7 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function RestoreSheet({ backup }: { backup: Backup }) {
+function RestoreSheet({ backup, onDone }: { backup: Backup; onDone: () => void }) {
   const [withSettings, setWithSettings] = useState(true);
   const [busy, setBusy] = useState(false);
   const date = backup.exportedAt ? new Date(backup.exportedAt).toLocaleString() : 'an unknown date';
@@ -64,6 +64,7 @@ function RestoreSheet({ backup }: { backup: Backup }) {
             setBusy(true);
             const r = await restoreBackup(backup, { settings: withSettings });
             closeSheet();
+            onDone();
             showToast(
               `Restored ${r.stories} ${r.stories === 1 ? 'story' : 'stories'}` +
                 (r.skipped ? `, skipped ${r.skipped} already here` : '') +
@@ -122,14 +123,10 @@ export function SettingsScreen() {
     else if (outcome === 'failed') showToast("Couldn't save the backup");
   };
 
-  const pickBackup = async (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
+  const pickBackup = async (file: File) => {
     const parsed = parseBackup(await file.text());
     if ('error' in parsed) showToast(parsed.error);
-    else showSheet(<RestoreSheet backup={parsed.backup} />);
+    else showSheet(<RestoreSheet backup={parsed.backup} onDone={() => void loadStorage()} />);
   };
 
   const protect = async () => {
@@ -214,7 +211,7 @@ export function SettingsScreen() {
         }
       >
         <Row icon={<Download size={20} />} label="Export full backup" hint="All stories, gestures and settings in one file" onClick={backup} />
-        <label class="row tappable">
+        <FilePicker class="row tappable" accept=".json,application/json" onPick={pickBackup} testId="restore-input">
           <span class="row-icon">
             <ArchiveRestore size={20} />
           </span>
@@ -222,8 +219,7 @@ export function SettingsScreen() {
             <span class="row-label">Restore from backup</span>
             <span class="row-hint">Adds stories from a backup file</span>
           </span>
-          <input type="file" accept=".json,application/json" hidden onChange={pickBackup} data-testid="restore-input" />
-        </label>
+        </FilePicker>
         {typeof navigator.storage?.persist === 'function' && (
           <Row
             icon={<ShieldCheck size={20} />}

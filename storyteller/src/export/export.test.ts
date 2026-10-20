@@ -31,7 +31,7 @@ describe('script export', () => {
         '',
         '## Chapter 1',
         '',
-        '*Wind. <Rain>.*',
+        '*Wind. \\<Rain\\>.*',
         '',
         '**ANA REYES**: Did you hear that?',
         '',
@@ -57,7 +57,7 @@ describe('backup', () => {
     settings: { ...DEFAULT_SETTINGS, theme: 'dark' },
     disabledBuiltins: ['z'],
     stories: [record('a', 'one'), record('b', 'two')],
-    gestures: [{ id: 'g1', profileId: 'p', action: 'nav.prev', samples: [[{ x: 1, y: 2 }]], createdAt: 3 }],
+    gestures: [{ id: 'g1', profileId: 'p', action: 'nav.prev', samples: [[{ x: 1, y: 2 }, { x: 40, y: 2 }]], createdAt: 3 }],
   });
 
   it('round-trips through JSON', () => {

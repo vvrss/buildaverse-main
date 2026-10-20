@@ -24,7 +24,8 @@ function VerifyPinSheet({ title, then }: { title: string; then: () => void }) {
       <PinPad
         label="Enter your current PIN"
         onComplete={async (pin) => {
-          if (!(await verifyCurrentPin(pin))) return 'Wrong PIN. Try again.';
+          const error = await verifyCurrentPin(pin);
+          if (error) return error;
           closeSheet();
           then();
           return null;
@@ -139,7 +140,12 @@ export function AccountScreen() {
 
       <Group title="Profiles">
         <Row icon={<LogOut size={20} />} label="Switch profile" hint="Back to “Who’s writing?”" onClick={() => signOut()} />
-        <Row icon={<UserPlus size={20} />} label="Add a profile" hint="For someone else on this device" onClick={() => signOut()} />
+        <Row
+          icon={<UserPlus size={20} />}
+          label="Add a profile"
+          hint="For someone else on this device"
+          onClick={() => signOut({ addProfile: true })}
+        />
       </Group>
 
       <Group>

@@ -1,4 +1,4 @@
-import type { Character } from '../format/types';
+import { type Character, idKey } from '../format/types';
 
 /**
  * Typed shortcuts in the composer. `@` opens character suggestions,
@@ -29,23 +29,22 @@ export type PrefixState =
   | { type: 'switch'; speaker: string; rest: string };
 
 export function readPrefix(draft: string, characters: Character[]): PrefixState {
-  const mention = /^@([\p{L}\p{N}_-]*)$/u.exec(draft);
+  const mention = /^@([\p{L}\p{M}\p{N}_-]*)$/u.exec(draft);
   if (mention) {
-    const q = mention[1].toLowerCase();
-    const matches = characters.filter(
-      (c) => c.id.toLowerCase().startsWith(q) || c.name.toLowerCase().startsWith(q),
-    );
+    const q = idKey(mention[1]);
+    const matches = characters
+      .filter((c) => idKey(c.id).startsWith(q) || idKey(c.name).startsWith(q))
+      // An exact id or name match comes first, so Enter picks it.
+      .sort((a, b) => Number(idKey(b.id) === q || idKey(b.name) === q) - Number(idKey(a.id) === q || idKey(a.name) === q));
     return { type: 'mention', query: mention[1], matches };
   }
 
-  const switchTo = /^@([\p{L}\p{N}_-]+)[\s:]\s*(.*)$/su.exec(draft);
+  // "@name " switches only on an exact id or name. Anything else stays text,
+  // so sending it creates that character (e.g. "Al" next to an existing "Alice").
+  const switchTo = /^@([\p{L}\p{M}\p{N}_-]+)[\s:]\s*(.*)$/su.exec(draft);
   if (switchTo) {
-    const q = switchTo[1].toLowerCase();
-    const exact = characters.find((c) => c.id.toLowerCase() === q);
-    const byPrefix = characters.filter(
-      (c) => c.id.toLowerCase().startsWith(q) || c.name.toLowerCase().startsWith(q),
-    );
-    const target = exact ?? (byPrefix.length === 1 ? byPrefix[0] : undefined);
+    const q = idKey(switchTo[1]);
+    const target = characters.find((c) => idKey(c.id) === q) ?? characters.find((c) => idKey(c.name) === q);
     if (target) return { type: 'switch', speaker: target.id, rest: switchTo[2] };
     return { type: 'none' };
   }

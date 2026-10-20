@@ -1,10 +1,12 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
+import { parseStory } from '../format/parser';
+import { type Character, idKey } from '../format/types';
 import { bindableActions, describeAction } from '../shortcuts/actions';
 import { HOTKEY_HELP } from '../shortcuts/hotkeys';
 import { COMMANDS } from '../shortcuts/prefixes';
-import type { Point } from '../store/db';
+import { type Point, db } from '../store/db';
+import { profileId } from '../store/session';
 import { GESTURE_THRESHOLDS, settings } from '../store/settings';
-import { story } from '../store/storyStore';
 import { Switch } from '../ui/controls';
 import { BUILTIN_GESTURES } from './defaults';
 import { makeTemplates, rank } from './recognizer';
@@ -13,16 +15,40 @@ import { StrokeCanvas, StrokeThumb } from './StrokeCanvas';
 
 const SAMPLES_NEEDED = 3;
 
+/** Characters from this profile's own stories, for binding gestures to them. */
+function useProfileCharacters(): Character[] {
+  const [cast, setCast] = useState<Character[]>([]);
+  const owner = profileId.value;
+  useEffect(() => {
+    if (!owner) return;
+    let alive = true;
+    void db.listStories(owner).then((records) => {
+      const seen = new Map<string, Character>();
+      for (const r of records) {
+        for (const c of parseStory(r.text).story.characters) {
+          if (!seen.has(idKey(c.id))) seen.set(idKey(c.id), c);
+        }
+      }
+      if (alive) setCast([...seen.values()]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [owner]);
+  return cast;
+}
+
 function Recorder() {
-  const actions = bindableActions(story.value.characters);
-  const [action, setAction] = useState(actions[0]?.id ?? 'nav.prev');
+  const actions = bindableActions(useProfileCharacters());
+  const [action, setAction] = useState('nav.prev');
   const [samples, setSamples] = useState<Point[][]>([]);
   const [warning, setWarning] = useState<string | null>(null);
 
   const onStroke = (points: Point[]) => {
     if (samples.length >= SAMPLES_NEEDED) return;
     // Warn when the new shape is too close to a different existing gesture.
-    const clash = rank(points, templates.value).find((m) => m.action !== action && m.score > 0.86);
+    const threshold = GESTURE_THRESHOLDS[settings.value.gestureSensitivity];
+    const clash = rank(points, templates.value).find((m) => m.action !== action && m.score >= threshold);
     setWarning(clash ? `Looks a lot like the gesture for "${describeAction(clash.action)}". Consider another shape.` : null);
     setSamples([...samples, points]);
   };

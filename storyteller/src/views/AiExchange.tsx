@@ -93,6 +93,12 @@ export function AiExchange() {
                 </>
               )}
             </p>
+            {preview.diff.truncated && (
+              <p class="notice warn small">
+                The reply changes too much to compare line by line, so every line shows as replaced. Check the result
+                before applying; you can undo afterwards.
+              </p>
+            )}
             <IssueList issues={preview.issues} />
             {!unchanged && (
               <pre class="diff">
