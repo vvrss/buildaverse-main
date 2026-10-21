@@ -116,7 +116,7 @@ function ProfileForm({ onCancel, submitLabel }: { onCancel?: () => void; submitL
           {submitLabel}
         </button>
       </div>
-      <p class="fine-print">Your profile and stories stay on this device. Nothing is sent anywhere.</p>
+      <p class="fine-print">Your profile and stories stay on this device. Nothing is sent anywhere unless you publish it.</p>
     </form>
   );
 }
@@ -169,7 +169,7 @@ export function Welcome() {
       <button type="button" class="btn primary wide" onClick={() => setStep('profile')} data-testid="get-started">
         <PenLine size={18} /> Get started
       </button>
-      <p class="fine-print">Private by design: everything stays on this device.</p>
+      <p class="fine-print">Private by design: your stories stay on this device until you choose to publish one.</p>
     </div>
   );
 }

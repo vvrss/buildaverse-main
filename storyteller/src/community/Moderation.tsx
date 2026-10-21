@@ -98,6 +98,28 @@ function Writers() {
   );
 }
 
+/** "hid", "suspended", "dismissed the reports on"… for a log line. */
+const ACTIONS: Record<string, string> = {
+  hide: 'hid',
+  unhide: 'made visible again',
+  ban: 'suspended',
+  unban: 'lifted the suspension of',
+  delete: 'deleted',
+  'role:moderator': 'made a moderator:',
+  'role:user': 'removed the moderator role from',
+  'resolve:dismissed': 'dismissed the reports on',
+  'resolve:actioned': 'handled the reports on',
+};
+
+const TARGETS: Record<string, string> = { story: 'a story', episode: 'an episode', comment: 'a comment', user: '' };
+
+function logTarget(l: ModLogEntry) {
+  if (l.targetKind === 'user') return <a href={`#${cPath.user(l.targetId)}`}>@{l.targetId}</a>;
+  const link = l.targetKind === 'story' ? cPath.story(l.targetId) : l.targetKind === 'episode' ? cPath.episode(l.targetId) : null;
+  const label = TARGETS[l.targetKind] ?? l.targetKind;
+  return link && !l.action.startsWith('delete') ? <a href={`#${link}`}>{label}</a> : <span>{label}</span>;
+}
+
 function Log() {
   const list = usePaged<ModLogEntry>('/mod/log');
   if (list.error) return <ErrorBox error={list.error} retry={list.reload} />;
@@ -106,9 +128,8 @@ function Log() {
       <ul class="mod-log">
         {list.items.map((l) => (
           <li key={l.id}>
-            <span class="muted small">{ago(l.createdAt)}</span> <b>{l.moderator?.displayName ?? 'Someone'}</b> {l.action} {l.targetKind}{' '}
-            <code>{l.targetId}</code>
-            {l.note && <span class="muted"> · {l.note}</span>}
+            <b>{l.moderator?.displayName ?? 'Someone'}</b> {ACTIONS[l.action] ?? l.action} {logTarget(l)}
+            {l.note && <span class="muted"> · “{l.note}”</span>} <span class="muted small">· {ago(l.createdAt)}</span>
           </li>
         ))}
       </ul>
