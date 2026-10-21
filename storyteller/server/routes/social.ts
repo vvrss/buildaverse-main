@@ -6,6 +6,7 @@ import type { AppEnv, Deps, UserRow } from '../context';
 import { HttpError, forbidden, notFound } from '../http/errors';
 import { DAY, MINUTE } from '../http/ratelimit';
 import { limitParam, readJson } from '../http/validate';
+import { logAction } from '../modlog';
 import { notify } from '../notify';
 import {
   type EpisodeRow,
@@ -333,8 +334,11 @@ export function socialRoutes() {
     // The commenter, the episode's author and moderators can remove a comment.
     if (row.author_id !== user.id && story.author_id !== user.id && !isModerator(user)) throw forbidden();
     const hasReplies = !!deps.db.get('SELECT 1 FROM comments WHERE parent_id = ?', row.id);
-    if (hasReplies) deps.db.run("UPDATE comments SET body = '', deleted_at = ? WHERE id = ?", deps.clock.now(), row.id);
-    else deps.db.run('DELETE FROM comments WHERE id = ?', row.id);
+    deps.db.tx(() => {
+      if (hasReplies) deps.db.run("UPDATE comments SET body = '', deleted_at = ? WHERE id = ?", deps.clock.now(), row.id);
+      else deps.db.run('DELETE FROM comments WHERE id = ?', row.id);
+      if (row.author_id !== user.id && story.author_id !== user.id) logAction(deps, user, 'delete', 'comment', row.id);
+    });
     return c.json({ ok: true });
   });
 
