@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { extractStoryText, storyForAi } from './ai';
 import { diffLines } from './diff';
+import { storyRefs } from './images';
+import { parseStory as legacyParse } from './legacy/parser';
+import { serializeStory as legacySerialize } from './legacy/serializer';
 import { parseStory } from './parser';
 import { serializeStory } from './serializer';
 import type { Story } from './types';
@@ -218,5 +221,56 @@ describe('re-check fixes', () => {
       expect(d.ops.filter((o) => o.type !== 'del').map((o) => o.text)).toEqual(b);
       expect(d.ops.filter((o) => o.type === 'same').length).toBe(lcs(a, b));
     }
+  });
+});
+
+describe('pictures in the format', () => {
+  const TEXT = `---
+title: With pictures
+cover: img:0a1b2c3d4e5f6a7b
+characters:
+  ana: Ana Reyes  img:9c1d2e3f4a5b6c7d  #e76f51
+  tom: Tom  #2a9d8f
+---
+
+![The lighthouse [at dusk]](img:3fa94c0d1b2e7a55)
+@ana: Look.
+![](img:1111222233334444)
+`;
+
+  it('reads cover, portraits and pictures, and writes them back unchanged', () => {
+    const { story, issues } = parseStory(TEXT);
+    expect(issues).toEqual([]);
+    expect(story.cover).toBe('0a1b2c3d4e5f6a7b');
+    expect(story.characters[0]).toMatchObject({ name: 'Ana Reyes', portrait: '9c1d2e3f4a5b6c7d', color: '#e76f51' });
+    expect(story.characters[1].portrait).toBeUndefined();
+    expect(story.blocks[0]).toMatchObject({ kind: 'image', ref: '3fa94c0d1b2e7a55', text: 'The lighthouse [at dusk]' });
+    expect(story.blocks[2]).toMatchObject({ kind: 'image', ref: '1111222233334444', text: '' });
+    const again = parseStory(serializeStory(story)).story;
+    expect(serializeStory(again)).toBe(serializeStory(story));
+    expect(storyRefs(story).sort()).toEqual(['0a1b2c3d4e5f6a7b', '1111222233334444', '3fa94c0d1b2e7a55', '9c1d2e3f4a5b6c7d']);
+  });
+
+  it('survives a trip through the version without pictures, both ways', () => {
+    // The old app reads picture lines as narration and writes them back as "> ![…](img:…)".
+    const old = legacySerialize(legacyParse(TEXT).story);
+    expect(old).toContain('> ![The lighthouse [at dusk]](img:3fa94c0d1b2e7a55)');
+    expect(old).toContain('img:9c1d2e3f4a5b6c7d');
+    const back = parseStory(old).story;
+    expect(serializeStory(back)).toBe(serializeStory(parseStory(TEXT).story));
+    // And files from the old app still read the same in the new one.
+    const plain = '---\ntitle: Old\ncharacters:\n  ana: Ana  #e76f51\n---\n\n@ana: Hi.\n> Rain.\n';
+    expect(serializeStory(parseStory(plain).story)).toBe(legacySerialize(legacyParse(plain).story));
+  });
+
+  it('never loads pictures from the web', () => {
+    const { story, issues } = parseStory('![x](https://example.com/a.png)\n');
+    expect(story.blocks[0]).toMatchObject({ kind: 'narration', text: '![x](https://example.com/a.png)' });
+    expect(issues[0].message).toMatch(/web/);
+  });
+
+  it('keeps one-line captions and no continuation after a picture', () => {
+    const { story } = parseStory('![a](img:3fa94c0d1b2e7a55)\n  indented\n');
+    expect(story.blocks.map((b) => b.kind)).toEqual(['image', 'narration']);
   });
 });

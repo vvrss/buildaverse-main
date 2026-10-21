@@ -7,6 +7,7 @@ import { type StoryRecord, db, persistent } from '../store/db';
 import { currentProfile } from '../store/profile';
 import { createStory, deleteStory, duplicateStory, flushSave, renameStory, showToast } from '../store/storyStore';
 import { onBroadcast } from '../store/sync';
+import { Picture } from '../images/Picture';
 import { Avatar, FilePicker, Row } from '../ui/controls';
 import { Sheet, closeSheet, confirmAction, showSheet } from '../ui/overlay';
 import { ExportSheet } from './ExportSheet';
@@ -43,6 +44,13 @@ function Cover({ card }: { card: Card }) {
   const b = colors[1] ?? colors[0] ?? '#3a86ff';
   const lead = story.characters[0]?.id;
   const color = (id: string) => story.characters.find((c) => c.id === id)?.color ?? '#888';
+  if (story.cover) {
+    return (
+      <div class="cover photo" aria-hidden="true">
+        <Picture pictureRef={story.cover} alt="" class="cover-photo" sizes="(max-width: 640px) 92vw, 300px" />
+      </div>
+    );
+  }
   return (
     <div class="cover" style={`--a:${a};--b:${b}`} aria-hidden="true">
       {preview.length === 0 && <span class="cover-empty">Nothing written yet</span>}

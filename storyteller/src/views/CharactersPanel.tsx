@@ -1,15 +1,23 @@
 import { useState } from 'preact/hooks';
+import { ImagePlus, Trash2 } from 'lucide-preact';
 import type { Character } from '../format/types';
+import { Picture, Portrait } from '../images/Picture';
+import { chooseCover, choosePortrait } from '../images/flows';
 import { countLines } from '../store/logic';
 import {
   addCharacter,
   changeCharacterId,
   deleteCharacter,
   moveCharacter,
+  setCover,
   showToast,
   story,
   updateCharacter,
 } from '../store/storyStore';
+
+function setPortrait(c: Character, ref: string | undefined) {
+  updateCharacter(c.id, { portrait: ref });
+}
 
 function CharacterRow({ c, index, total }: { c: Character; index: number; total: number }) {
   const [id, setId] = useState(c.id);
@@ -22,14 +30,29 @@ function CharacterRow({ c, index, total }: { c: Character; index: number; total:
     if (err) setId(c.id);
   };
 
+  const pickPortrait = async () => {
+    const ref = await choosePortrait(c.name);
+    if (ref) setPortrait(c, ref);
+  };
+
   return (
     <li class="cast-row">
-      <input
-        type="color"
-        value={c.color}
-        aria-label={`Color for ${c.name}`}
-        onInput={(e) => updateCharacter(c.id, { color: (e.currentTarget as HTMLInputElement).value })}
-      />
+      <div class="cast-look">
+        <button type="button" class="portrait-btn" aria-label={`Portrait for ${c.name}`} onClick={pickPortrait}>
+          <Portrait name={c.name} color={c.color} portrait={c.portrait} size={44} />
+        </button>
+        <input
+          type="color"
+          value={c.color}
+          aria-label={`Color for ${c.name}`}
+          onInput={(e) => updateCharacter(c.id, { color: (e.currentTarget as HTMLInputElement).value })}
+        />
+        {c.portrait && (
+          <button type="button" class="link small" aria-label={`Remove the portrait of ${c.name}`} onClick={() => setPortrait(c, undefined)}>
+            Remove
+          </button>
+        )}
+      </div>
       <div class="cast-fields">
         <input
           type="text"
@@ -84,11 +107,34 @@ export function CharactersPanel() {
     if (addCharacter(name)) setName('');
   };
 
+  const cover = story.value.cover;
+  const pickCover = async () => {
+    const ref = await chooseCover();
+    if (ref) setCover(ref);
+  };
+
   return (
     <div class="page cast">
+      <section class="cover-pick">
+        {cover ? (
+          <button type="button" class="cover-btn" aria-label="Change the cover" onClick={pickCover}>
+            <Picture pictureRef={cover} alt="Cover" class="cover-img" eager />
+          </button>
+        ) : (
+          <button type="button" class="cover-btn empty" onClick={pickCover} data-testid="add-cover">
+            <ImagePlus size={22} />
+            <span>Add a cover</span>
+          </button>
+        )}
+        {cover && (
+          <button type="button" class="link small" onClick={() => setCover(undefined)}>
+            <Trash2 size={14} /> Remove cover
+          </button>
+        )}
+      </section>
       <p class="muted small">
         The order sets the swipe order and the Alt+number keys. The first character appears on the right, like "you" in a
-        chat. Changing an @id updates every line.
+        chat. Changing an @id updates every line. Tap a circle to give a character a portrait.
       </p>
       <ul class="cast-list">
         {cast.map((c, i) => (

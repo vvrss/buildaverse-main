@@ -1,7 +1,7 @@
 import { batch, signal } from '@preact/signals';
 import { parseStory } from '../format/parser';
 import { serializeStory } from '../format/serializer';
-import { type Character, type Story, emptyStory, nextColor, slugify, uniqueId } from '../format/types';
+import { type Character, type Story, emptyStory, newBlockId, nextColor, slugify, uniqueId } from '../format/types';
 import { go, storyPath } from '../router';
 import { db } from './db';
 import { History } from './history';
@@ -10,6 +10,7 @@ import { settings } from './settings';
 import { broadcast, onBroadcast } from './sync';
 import {
   HEADING,
+  IMAGE,
   NARRATION,
   NOTE,
   type Voice,
@@ -555,6 +556,11 @@ function continueInsert(index: number, blocks: Story['blocks'], following: Voice
  * kept as it is, even if it starts like a prefix ("@tom is late").
  */
 function composeEdit(block: Story['blocks'][number], s: Story): Composed {
+  // A picture's caption is plain text: no prefixes, no other speaker, one line.
+  if (block.kind === 'image') {
+    const text = draft.value.replace(/\s+/g, ' ').trim();
+    return { block: { ...block, text }, characters: s.characters, voice: IMAGE };
+  }
   if (draft.value === draftOf(block) && voice.value !== voiceOf(block)) {
     return { block: revoice(block, voice.value, s.characters), characters: s.characters, voice: voice.value };
   }
@@ -720,6 +726,38 @@ export function moveCurrent(step: -1 | 1) {
     setStory({ ...story.value, blocks });
     mode.value = { type: 'edit', index: target };
   });
+}
+
+/**
+ * Puts a picture into the story where the composer is: at the insertion
+ * point, or below the line being edited. The unsent line stays in the composer.
+ */
+export function insertImage(ref: string, caption = '') {
+  runFlushHooks();
+  batch(() => {
+    saveEditIfChanged();
+    const m = mode.value;
+    const s = story.value;
+    const at = m.type === 'edit' ? m.index + 1 : m.at;
+    const blocks = [...s.blocks];
+    blocks.splice(at, 0, { kind: 'image', id: newBlockId(), ref, text: caption });
+    const atEnd = isAtEnd();
+    setStory({ ...s, blocks });
+    if (m.type === 'edit') {
+      if (at + 1 >= blocks.length) exitToNew(blocks.length);
+      else {
+        mode.value = { type: 'new', at: at + 1 };
+        draft.value = '';
+        voice.value = voiceAfter(blocks, at, s.characters);
+      }
+    } else mode.value = { type: 'new', at: atEnd ? blocks.length : at + 1 };
+  });
+}
+
+/** Sets or removes the story's cover picture. */
+export function setCover(ref: string | undefined) {
+  const { cover: _old, ...rest } = story.value;
+  setStory(ref ? { ...rest, cover: ref } : rest);
 }
 
 // ------------------------------------------------------------------ voices

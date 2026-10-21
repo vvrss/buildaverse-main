@@ -2,7 +2,9 @@ import { useEffect, useState } from 'preact/hooks';
 import { ClipboardCopy, FileCode2, FileText, Printer, Share2 } from 'lucide-preact';
 import { safeFilename, canShareFiles, printHtml, printIsUnavailable, saveFile, shareFile } from '../export/files';
 import { toPrintableHtml, toScript } from '../export/script';
+import { storyRefs } from '../format/images';
 import { serializeStory } from '../format/serializer';
+import { pictureDataUrls } from '../images/pictures';
 import type { Story } from '../format/types';
 import { showToast } from '../store/storyStore';
 import { Row, Switch } from '../ui/controls';
@@ -35,7 +37,7 @@ export function ExportSheet({ story }: { story: Story }) {
     done();
   };
   const print = async () => {
-    const html = toPrintableHtml(story, { notes });
+    const html = toPrintableHtml(story, { notes, pictures: await pictureDataUrls(storyRefs(story)) });
     if (noPrint) report(await saveFile(`${name} (print).html`, html, 'text/html'), 'Printable page');
     else printHtml(html);
     done();

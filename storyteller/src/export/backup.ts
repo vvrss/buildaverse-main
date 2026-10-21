@@ -1,15 +1,34 @@
+import { REF_RE, textRefs } from '../format/images';
 import { parseStory } from '../format/parser';
+import { refOf } from '../images/compress';
+import { type PictureRecord, getPicture, putPicture } from '../images/media';
+import { picturesOf } from '../images/pictures';
 import { loadGestures, setDisabledBuiltins } from '../gestures/store';
 import { type GestureRecord, type Point, type StoryRecord, db } from '../store/db';
 import { requireProfileId } from '../store/session';
 import { DEFAULT_SETTINGS, type Settings, loadSettings, settings, updateSettings } from '../store/settings';
 
 /**
- * Full backup: one JSON file with a profile's stories, gestures and settings.
- * Restoring adds to what is already there and never overwrites a story.
+ * Full backup: one JSON file with a profile's stories, gestures and settings,
+ * and optionally its pictures (base64). Restoring adds to what is already
+ * there and never overwrites a story.
+ *
+ * Format 1 has no pictures; format 2 adds a "pictures" list. A backup
+ * without pictures is still written as format 1, so older versions read it.
  */
 
 export const BACKUP_FORMAT = 1;
+const NEWEST_FORMAT = 2;
+
+export interface BackupPicture {
+  ref: string;
+  type: string;
+  width: number;
+  height: number;
+  createdAt: number;
+  /** The picture's bytes, base64. */
+  data: string;
+}
 
 export interface Backup {
   app: 'storyteller';
@@ -20,6 +39,7 @@ export interface Backup {
   disabledBuiltins: string[];
   stories: { id: string; title: string; text: string; createdAt: number; updatedAt: number }[];
   gestures: { action: string; samples: Point[][]; createdAt: number }[];
+  pictures: BackupPicture[];
 }
 
 export function buildBackup(input: {
@@ -38,7 +58,34 @@ export function buildBackup(input: {
     disabledBuiltins: input.disabledBuiltins,
     stories: input.stories.map(({ id, title, text, createdAt, updatedAt }) => ({ id, title, text, createdAt, updatedAt })),
     gestures: input.gestures.map(({ action, samples, createdAt }) => ({ action, samples, createdAt })),
+    pictures: [],
   };
+}
+
+function base64Of(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+/**
+ * The backup as a file. Pictures are added piece by piece, so even a large
+ * backup is never built as one giant string.
+ */
+export async function backupFile(backup: Backup, pictures: PictureRecord[] = []): Promise<Blob> {
+  const { pictures: _none, ...rest } = backup;
+  const base = JSON.stringify({ ...rest, format: pictures.length ? 2 : BACKUP_FORMAT }, null, 1);
+  if (pictures.length === 0) return new Blob([base], { type: 'application/json' });
+  const parts: BlobPart[] = [base.slice(0, base.lastIndexOf('}')).trimEnd(), ',\n "pictures": ['];
+  for (const [i, p] of pictures.entries()) {
+    const head = { ref: p.ref, type: p.blob.type, width: p.width, height: p.height, createdAt: p.createdAt };
+    parts.push(`${i ? ',' : ''}\n  ${JSON.stringify(head).slice(0, -1)},"data":"`, await base64Of(p.blob), '"}');
+  }
+  parts.push('\n ]\n}\n');
+  return new Blob(parts, { type: 'application/json' });
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
@@ -52,7 +99,7 @@ export function parseBackup(text: string): { backup: Backup } | { error: string 
     return { error: 'This file is not a Storyteller backup (it is not valid JSON).' };
   }
   if (!isObj(data) || data.app !== 'storyteller') return { error: 'This file is not a Storyteller backup.' };
-  if (typeof data.format !== 'number' || data.format > BACKUP_FORMAT) {
+  if (typeof data.format !== 'number' || data.format > NEWEST_FORMAT) {
     return { error: 'This backup comes from a newer version of Storyteller. Update the app and try again.' };
   }
   if (!Array.isArray(data.stories)) return { error: 'The backup has no stories list.' };
@@ -79,6 +126,20 @@ export function parseBackup(text: string): { backup: Backup } | { error: string 
       samples: g.samples.map((s) => s.map((p) => ({ x: Number(p.x), y: Number(p.y) }))),
       createdAt: Number(g.createdAt) || Date.now(),
     }));
+  const pictures = (Array.isArray(data.pictures) ? data.pictures : []).filter(
+    (p): p is BackupPicture =>
+      isObj(p) &&
+      typeof p.ref === 'string' &&
+      REF_RE.test(p.ref) &&
+      typeof p.type === 'string' &&
+      /^image\/(webp|jpeg|png|avif)$/.test(p.type) &&
+      typeof p.data === 'string' &&
+      /^[A-Za-z0-9+/]*={0,2}$/.test(p.data.slice(-8)) &&
+      Number.isInteger(p.width) &&
+      Number.isInteger(p.height) &&
+      (p.width as number) > 0 &&
+      (p.height as number) > 0,
+  );
   const profile = isObj(data.profile) ? data.profile : {};
   return {
     backup: {
@@ -96,6 +157,7 @@ export function parseBackup(text: string): { backup: Backup } | { error: string 
         updatedAt: Number(s.updatedAt) || Date.now(),
       })),
       gestures,
+      pictures: pictures.map((p) => ({ ...p, createdAt: Number(p.createdAt) || Date.now() })),
     },
   };
 }
@@ -120,6 +182,11 @@ export function planRestore(backup: Backup, existing: Pick<StoryRecord, 'id' | '
 }
 
 // ------------------------------------------------------------ with storage
+
+/** The pictures this profile's stories use (what a backup with pictures carries). */
+export async function backupPictures(stories: Pick<StoryRecord, 'text'>[]): Promise<PictureRecord[]> {
+  return picturesOf([...new Set(stories.flatMap((s) => textRefs(s.text)))]);
+}
 
 export async function exportBackup(profile: { name: string; color: string }): Promise<Backup> {
   const id = requireProfileId();
@@ -170,11 +237,26 @@ export async function restoreBackup(backup: Backup, options: { settings: boolean
     gestures += 1;
   }
 
+  let pictures = 0;
+  for (const p of backup.pictures) {
+    if (await getPicture(profile, p.ref)) continue;
+    try {
+      const bytes = Uint8Array.from(atob(p.data), (ch) => ch.charCodeAt(0));
+      const blob = new Blob([bytes], { type: p.type });
+      // A damaged picture would show the wrong thing under its code: skip it.
+      if ((await refOf(blob)) !== p.ref) continue;
+      await putPicture({ ref: p.ref, profileId: profile, blob, width: p.width, height: p.height, createdAt: p.createdAt });
+      pictures += 1;
+    } catch {
+      // Not valid base64: skip this picture.
+    }
+  }
+
   if (options.settings) {
     updateSettings(backup.settings);
     await setDisabledBuiltins(backup.disabledBuiltins);
     await loadSettings(profile);
   }
   await loadGestures(profile);
-  return { stories: plan.add.length, skipped: plan.skip, gestures };
+  return { stories: plan.add.length, skipped: plan.skip, gestures, pictures };
 }

@@ -8,18 +8,24 @@ export interface Character {
   id: string;
   name: string;
   color: string;
+  /** Picture code of the character's portrait (`img:<ref>` in the header). */
+  portrait?: string;
 }
 
 export type Block =
   | { kind: 'line'; id: string; speaker: string; direction?: string; text: string }
   | { kind: 'narration'; id: string; text: string }
   | { kind: 'heading'; id: string; text: string }
-  | { kind: 'note'; id: string; text: string };
+  | { kind: 'note'; id: string; text: string }
+  /** A picture in the story; `text` is its caption (one line, may be empty). */
+  | { kind: 'image'; id: string; ref: string; text: string };
 
 export type BlockKind = Block['kind'];
 
 export interface Story {
   title: string;
+  /** Picture code of the cover (`cover: img:<ref>` in the header). */
+  cover?: string;
   characters: Character[];
   /** Unknown header keys, preserved so AI or hand edits are not lost. */
   meta: [string, string][];

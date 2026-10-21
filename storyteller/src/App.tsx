@@ -112,7 +112,9 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
 
   const back = async () => {
     await closeStory(id);
-    go('/');
+    // Unless the person already went somewhere else while it saved.
+    const r = route.value;
+    if (r.name === 'story' && r.id === id) go('/');
   };
 
   const saveTitle = saveState.value === 'saved' ? 'Saved on this device' : saveState.value === 'error' ? 'Saving failed' : 'Saving…';

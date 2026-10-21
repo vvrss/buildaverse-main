@@ -6,6 +6,8 @@ import { type ProfileRecord, db } from './db';
 import { checkPin, makePin } from './pin';
 import { profileId } from './session';
 import { loadSettings, previewAppearance, resetSettingsView } from './settings';
+import { deleteProfilePictures } from '../images/media';
+import { collectUnusedPictures, releasePictureUrls } from '../images/pictures';
 import { closeStory, forgetLocalCopies, recoverJournals, resetEditor, showToast } from './storyStore';
 import { broadcast, onBroadcast } from './sync';
 import { gesturePadOpen } from './ui';
@@ -57,6 +59,8 @@ async function activate(p: ProfileRecord) {
   await db.setGlobal('lastProfile', p.id);
   await db.setGlobal('signedOut', false);
   await Promise.all([loadSettings(p.id), loadGestures(p.id), recoverJournals(p.id)]);
+  // After journals are applied, so a recovered story keeps its pictures.
+  void collectUnusedPictures(p.id).catch(() => {});
   batch(() => {
     profileId.value = p.id;
     currentProfile.value = updated;
@@ -171,6 +175,7 @@ async function leave({ discard = false } = {}) {
   });
   resetSettingsView();
   resetGestures();
+  releasePictureUrls();
 }
 
 /** Locks the current profile; its PIN is needed to come back. */
@@ -224,6 +229,7 @@ export async function deleteCurrentProfile() {
   await leave();
   await db.deleteProfile(p.id);
   forgetLocalCopies(p.id, storyIds);
+  await deleteProfilePictures(p.id).catch(() => {});
   await db.setGlobal(`pinLock:${p.id}`, { failures: 0, until: 0 });
   broadcast({ type: 'profile-deleted', id: p.id });
   await refresh();

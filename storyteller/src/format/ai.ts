@@ -9,6 +9,7 @@ export const AI_PREAMBLE = `This is a story in the ".story" format. Keep the for
 - Dialog: "@id: text" or "@id (stage direction): text". Only use ids from the header, or add new ones there.
 - Narration: "> text". Chapter/scene heading: "# text". Author note: "// text".
 - A line indented by two spaces continues the line above it.
+- Pictures: "![caption](img:code)" lines, "img:code" in the cast and "cover: img:code". Keep every img: code exactly; never invent one.
 Reply with the complete story in one \`\`\`story code block, and nothing outside it.`;
 
 export function storyForAi(storyText: string, request = ''): string {

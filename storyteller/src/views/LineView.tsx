@@ -1,4 +1,5 @@
 import type { Block, Character } from '../format/types';
+import { Picture, Portrait } from '../images/Picture';
 import { tint } from '../ui/color';
 
 interface Props {
@@ -37,25 +38,42 @@ export function LineView({ block, index, character, isLead, showName, selected, 
           {lines(block.text)}
         </div>
       );
-    case 'line':
+    case 'image':
+      return (
+        <figure class={`blk image${cls}`} data-index={index} onClick={select}>
+          <Picture pictureRef={block.ref} alt={block.text} />
+          {block.text && <figcaption>{block.text}</figcaption>}
+        </figure>
+      );
+    case 'line': {
+      const portrait = character?.portrait;
       return (
         <div
-          class={`blk line${isLead ? ' lead' : ''}${showName ? ' first' : ''}${cls}`}
+          class={`blk line${isLead ? ' lead' : ''}${showName ? ' first' : ''}${portrait ? ' with-portrait' : ''}${cls}`}
           data-index={index}
           style={tint(character?.color)}
           onClick={select}
         >
-          {showName && (
-            <div class="who">
-              {character?.name ?? block.speaker}
-              {block.direction && <i> ({block.direction})</i>}
+          {portrait &&
+            (showName ? (
+              <Portrait name={character.name} color={character.color} portrait={portrait} />
+            ) : (
+              <span class="portrait-spacer" aria-hidden="true" />
+            ))}
+          <div class="line-body">
+            {showName && (
+              <div class="who">
+                {character?.name ?? block.speaker}
+                {block.direction && <i> ({block.direction})</i>}
+              </div>
+            )}
+            <div class="bubble">
+              {!showName && block.direction && <i class="dir">({block.direction}) </i>}
+              {lines(block.text)}
             </div>
-          )}
-          <div class="bubble">
-            {!showName && block.direction && <i class="dir">({block.direction}) </i>}
-            {lines(block.text)}
           </div>
         </div>
       );
+    }
   }
 }

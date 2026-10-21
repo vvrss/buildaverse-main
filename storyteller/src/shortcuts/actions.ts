@@ -1,4 +1,5 @@
 import type { Character } from '../format/types';
+import { addPictureToStory } from '../images/flows';
 import { HEADING, NARRATION, NOTE } from '../store/logic';
 import * as s from '../store/storyStore';
 import { gesturePadOpen } from '../store/ui';
@@ -32,6 +33,7 @@ const fixed: Record<string, ActionDef> = {
   'line.moveUp': { label: 'Move line up', run: () => s.moveCurrent(-1) },
   'line.moveDown': { label: 'Move line down', run: () => s.moveCurrent(1) },
   'pad.toggle': { label: 'Gesture pad', run: () => (gesturePadOpen.value = !gesturePadOpen.value) },
+  'block.picture': { label: 'Add a picture', run: () => void addPictureToStory() },
 };
 
 function resolve(id: string): ActionDef | null {

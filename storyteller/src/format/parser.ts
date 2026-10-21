@@ -9,6 +9,7 @@ import {
   newBlockId,
   nextColor,
 } from './types';
+import { IMAGE_LINE, IMAGE_REF, PORTRAIT_TAIL, WEB_IMAGE } from './images';
 
 const ID = `${ID_CHARS}+`;
 const DIALOG = new RegExp(`^@(${ID})\\s*(?:\\(([^)]*)\\))?\\s*:\\s?(.*)$`, 'u');
@@ -71,7 +72,7 @@ export function parseStory(source: string): ParseResult {
       continue;
     }
 
-    if (/^\s/.test(rawLine) && last && !prevBlank && last.kind !== 'heading') {
+    if (/^\s/.test(rawLine) && last && !prevBlank && last.kind !== 'heading' && last.kind !== 'image') {
       last.text = last.text ? `${last.text}\n${trimmed}` : trimmed;
       continue;
     }
@@ -96,6 +97,20 @@ function parseBodyLine(
   const id = newBlockId();
 
   if (line.startsWith('//')) return { kind: 'note', id, text: line.slice(2).trim() };
+
+  // "![caption](img:<ref>)", also as "> ![…](img:…)", which is how older
+  // versions of the app write a picture line back.
+  const picture = IMAGE_LINE.exec(line.replace(/^>\s*/, ''));
+  if (picture) return { kind: 'image', id, ref: picture[2], text: picture[1].trim() };
+  if (WEB_IMAGE.test(line.replace(/^>\s*/, ''))) {
+    issues.push({
+      line: lineNo,
+      severity: 'warning',
+      message: "Pictures from the web aren't loaded. It was kept as narration; add the picture in the app instead.",
+    });
+    return { kind: 'narration', id, text: line.replace(/^>\s*/, '') };
+  }
+
   if (line.startsWith('>')) return { kind: 'narration', id, text: line.slice(1).trim() };
   if (line.startsWith('#')) return { kind: 'heading', id, text: line.replace(/^#+/, '').trim() };
 
@@ -196,12 +211,13 @@ function readHeaderLines(
         continue;
       }
       seen.add(idKey(id));
-      const [, name, color] = COLOR_TAIL.exec(m[2].trim()) ?? [];
-      story.characters.push({
-        id,
-        name: name?.trim() || id,
-        color: color?.toLowerCase() ?? nextColor(story.characters),
-      });
+      const [, rawName = '', color] = COLOR_TAIL.exec(m[2].trim()) ?? [];
+      // "Ana Reyes  img:<ref>": the portrait sits between the name and the color.
+      const portrait = PORTRAIT_TAIL.exec(rawName.trim());
+      const name = (portrait ? portrait[1] : rawName).trim();
+      const character: Character = { id, name: name || id, color: color?.toLowerCase() ?? nextColor(story.characters) };
+      if (portrait) character.portrait = portrait[2];
+      story.characters.push(character);
       continue;
     }
 
@@ -214,6 +230,7 @@ function readHeaderLines(
     const key = m[1].toLowerCase();
     if (key === 'title') story.title = m[2].trim() || story.title;
     else if (key === 'characters' || key === 'cast') inCharacters = true;
+    else if (key === 'cover' && IMAGE_REF.test(m[2].trim())) story.cover = IMAGE_REF.exec(m[2].trim())![1];
     else story.meta.push([m[1], m[2].trim()]);
   }
 }

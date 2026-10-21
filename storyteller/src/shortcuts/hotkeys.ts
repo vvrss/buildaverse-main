@@ -72,6 +72,7 @@ export function hotkeyAction(e: KeyboardEvent, ctx: HotkeyContext): string | nul
     if (e.code === 'KeyH') return 'voice.heading';
     if (e.code === 'KeyC') return 'voice.note';
     if (e.code === 'KeyG') return 'pad.toggle';
+    if (e.code === 'KeyP') return 'block.picture';
     if (e.key === 'ArrowUp') return 'line.moveUp';
     if (e.key === 'ArrowDown') return 'line.moveDown';
   }
@@ -94,4 +95,5 @@ export const HOTKEY_HELP: [string, string][] = [
   [`${MOD}Shift+Backspace`, 'Delete the edited line'],
   ['Esc', 'Stop editing, jump to the end'],
   [`${ALT}G`, 'Gesture pad'],
+  [`${ALT}P`, 'Add a picture'],
 ];

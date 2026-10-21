@@ -20,17 +20,21 @@ export function serializeBlock(block: Block): string {
       return withContinuation('//', block.text);
     case 'heading':
       return `# ${oneLine(block.text)}`.trimEnd();
+    case 'image':
+      return `![${oneLine(block.text)}](img:${block.ref})`;
   }
 }
 
 /** Writes a story as `.story` text. `parseStory(serializeStory(s))` yields `s` again. */
 export function serializeStory(story: Story): string {
   const out: string[] = ['---', `title: ${oneLine(story.title) || 'Untitled story'}`];
+  if (story.cover) out.push(`cover: img:${story.cover}`);
   if (story.characters.length > 0) {
     out.push('characters:');
     const width = Math.max(...story.characters.map((c) => c.id.length));
     for (const c of story.characters) {
-      out.push(`  ${`${c.id}:`.padEnd(width + 1)} ${oneLine(c.name) || c.id}  ${c.color}`);
+      const portrait = c.portrait ? `  img:${c.portrait}` : '';
+      out.push(`  ${`${c.id}:`.padEnd(width + 1)} ${oneLine(c.name) || c.id}${portrait}  ${c.color}`);
     }
   }
   for (const [key, value] of story.meta) out.push(`${key}: ${oneLine(value)}`);

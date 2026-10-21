@@ -10,7 +10,9 @@ import {
   ShieldCheck,
   Smartphone,
 } from 'lucide-preact';
-import { type Backup, exportBackup, parseBackup, restoreBackup } from '../export/backup';
+import { type Backup, backupFile, backupPictures, exportBackup, parseBackup, restoreBackup } from '../export/backup';
+import { formatBytes } from '../images/compress';
+import { picturesUsage } from '../images/pictures';
 import { saveFile } from '../export/files';
 import { db } from '../store/db';
 import { currentProfile } from '../store/profile';
@@ -29,12 +31,6 @@ function Toggle({ id, label, hint, field }: { id: string; label: string; hint?: 
   );
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function RestoreSheet({ backup, onDone }: { backup: Backup; onDone: () => void }) {
   const [withSettings, setWithSettings] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -44,7 +40,9 @@ function RestoreSheet({ backup, onDone }: { backup: Backup; onDone: () => void }
       <p class="confirm-message">
         Backup of <b>{backup.profile.name}</b> from {date}: {backup.stories.length}{' '}
         {backup.stories.length === 1 ? 'story' : 'stories'} and {backup.gestures.length}{' '}
-        {backup.gestures.length === 1 ? 'gesture' : 'gestures'}. They are added to this profile; nothing here is
+        {backup.gestures.length === 1 ? 'gesture' : 'gestures'}
+        {backup.pictures.length > 0 && `, ${backup.pictures.length} ${backup.pictures.length === 1 ? 'picture' : 'pictures'}`}. They are
+        added to this profile; nothing here is
         overwritten, and stories you already have are skipped.
       </p>
       <div class="group-card">
@@ -68,7 +66,8 @@ function RestoreSheet({ backup, onDone }: { backup: Backup; onDone: () => void }
             showToast(
               `Restored ${r.stories} ${r.stories === 1 ? 'story' : 'stories'}` +
                 (r.skipped ? `, skipped ${r.skipped} already here` : '') +
-                (r.gestures ? `, ${r.gestures} gestures` : ''),
+                (r.gestures ? `, ${r.gestures} gestures` : '') +
+                (r.pictures ? `, ${r.pictures} pictures` : ''),
             );
           }}
         >
@@ -95,7 +94,9 @@ characters:
 @ana: Did you hear that?
 @tom (whispering): Stay still.
   (indented lines continue the line above)
+![The stairs going down](img:3fa94c0d1b2e7a55)
 // a note for yourself or the AI`}</pre>
+      <p class="muted small">Pictures stay on your device; the text only holds their img: codes, which must be kept as they are.</p>
     </Sheet>
   );
 }
@@ -103,13 +104,19 @@ characters:
 export function SettingsScreen() {
   const profile = currentProfile.value!;
   const s = settings.value;
-  const [storage, setStorage] = useState<{ stories: number; usage?: number; persisted?: boolean }>({ stories: 0 });
+  const [storage, setStorage] = useState<{ stories: number; usage?: number; persisted?: boolean; pictures: number; pictureBytes: number }>({
+    stories: 0,
+    pictures: 0,
+    pictureBytes: 0,
+  });
+  const [withPictures, setWithPictures] = useState(true);
 
   const loadStorage = async () => {
     const stories = (await db.listStories(profile.id)).length;
     const est = await navigator.storage?.estimate?.().catch(() => undefined);
     const persisted = await navigator.storage?.persisted?.().catch(() => undefined);
-    setStorage({ stories, usage: est?.usage, persisted });
+    const pics = await picturesUsage(profile.id).catch(() => ({ count: 0, bytes: 0 }));
+    setStorage({ stories, usage: est?.usage, persisted, pictures: pics.count, pictureBytes: pics.bytes });
   };
   useEffect(() => {
     void loadStorage();
@@ -118,8 +125,11 @@ export function SettingsScreen() {
   const backup = async () => {
     const data = await exportBackup(profile);
     const day = new Date().toISOString().slice(0, 10);
-    const outcome = await saveFile(`storyteller-backup-${day}.json`, JSON.stringify(data, null, 1), 'application/json');
-    if (outcome === 'saved') showToast(`Backup saved: ${data.stories.length} stories`);
+    const pictures = withPictures ? await backupPictures(data.stories) : [];
+    const outcome = await saveFile(`storyteller-backup-${day}.json`, await backupFile(data, pictures), 'application/json');
+    if (outcome === 'saved') {
+      showToast(`Backup saved: ${data.stories.length} stories${pictures.length ? `, ${pictures.length} pictures` : ''}`);
+    }
     else if (outcome === 'failed') showToast("Couldn't save the backup");
   };
 
@@ -211,6 +221,15 @@ export function SettingsScreen() {
         }
       >
         <Row icon={<Download size={20} />} label="Export full backup" hint="All stories, gestures and settings in one file" onClick={backup} />
+        {storage.pictures > 0 && (
+          <Row
+            label="Include pictures in the backup"
+            hint={`${storage.pictures} ${storage.pictures === 1 ? 'picture' : 'pictures'}, about ${formatBytes(storage.pictureBytes)}`}
+            htmlFor="backup-pictures"
+          >
+            <Switch id="backup-pictures" label="Include pictures in the backup" checked={withPictures} onChange={setWithPictures} />
+          </Row>
+        )}
         <FilePicker class="row tappable" accept=".json,application/json" onPick={pickBackup} testId="restore-input">
           <span class="row-icon">
             <ArchiveRestore size={20} />

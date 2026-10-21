@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { SendHorizontal } from 'lucide-preact';
+import { ImagePlus, SendHorizontal } from 'lucide-preact';
+import { addPictureToStory } from '../images/flows';
 import { runAction } from '../shortcuts/actions';
 import { hotkeyAction, isComposing } from '../shortcuts/hotkeys';
 import { readPrefix } from '../shortcuts/prefixes';
-import { HEADING, NARRATION, NOTE } from '../store/logic';
+import { HEADING, IMAGE, NARRATION, NOTE } from '../store/logic';
 import { draft, mode, setVoice, story, voice } from '../store/storyStore';
 import { settings } from '../store/settings';
 import { composerRef } from '../store/ui';
@@ -13,6 +14,7 @@ function placeholderFor(v: string, name: string | undefined): string {
   if (v === NARRATION) return 'Narration…  (@name to speak)';
   if (v === HEADING) return 'Chapter or scene heading…';
   if (v === NOTE) return 'Note to self or to the AI…';
+  if (v === IMAGE) return 'Caption for this picture (optional)…';
   return `${name ?? v} says…`;
 }
 
@@ -160,6 +162,14 @@ export function Composer() {
     return () => el.removeEventListener('compositionend', listener);
   }, []);
 
+  // A pasted picture goes into the story; pasted text stays text.
+  const onPaste = (e: ClipboardEvent) => {
+    const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    void addPictureToStory(file);
+  };
+
   // Some mobile keyboards skip keydown for Enter; catch the line break here.
   const onBeforeInput = (e: InputEvent) => {
     if (e.isComposing) return;
@@ -190,6 +200,16 @@ export function Composer() {
         </ul>
       )}
       <div class="composer" style={current ? tint(current.color) : undefined}>
+        <button
+          type="button"
+          class="icon-btn attach"
+          aria-label="Add a picture"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runAction('block.picture')}
+          data-testid="attach-picture"
+        >
+          <ImagePlus size={20} />
+        </button>
         <textarea
           ref={textarea}
           rows={1}
@@ -202,6 +222,7 @@ export function Composer() {
           onInput={onInput}
           onKeyDown={onKeyDown}
           onBeforeInput={onBeforeInput}
+          onPaste={onPaste}
           onFocus={() => (releaseTab.current = false)}
         />
         <button

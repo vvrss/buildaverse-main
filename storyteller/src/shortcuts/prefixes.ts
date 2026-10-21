@@ -17,6 +17,7 @@ export const COMMANDS: { cmd: string; action: string; help: string }[] = [
   { cmd: 'e', action: 'nav.end', help: 'jump to end' },
   { cmd: 'd', action: 'line.delete', help: 'delete edited line' },
   { cmd: 'g', action: 'pad.toggle', help: 'gesture pad' },
+  { cmd: 'p', action: 'block.picture', help: 'add a picture' },
 ];
 
 export type PrefixState =

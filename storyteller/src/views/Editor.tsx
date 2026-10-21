@@ -2,6 +2,7 @@ import { Fragment } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { ArrowDown, ArrowDownToLine, ArrowUp, ListPlus, Trash2, X } from 'lucide-preact';
 import { GesturePad } from '../gestures/GesturePad';
+import { addPictureToStory } from '../images/flows';
 import { ShortcutBar } from '../shortcuts/ShortcutBar';
 import {
   deleteCurrent,
@@ -111,7 +112,20 @@ export function Editor() {
   return (
     <>
       <div class="stage">
-        <div class="log" ref={log} data-testid="log">
+        <div
+          class="log"
+          ref={log}
+          data-testid="log"
+          onDragOver={(e) => {
+            if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            const file = [...(e.dataTransfer?.files ?? [])].find((f) => f.type.startsWith('image/'));
+            if (!file) return;
+            e.preventDefault();
+            void addPictureToStory(file);
+          }}
+        >
           {s.blocks.length === 0 && <EmptyHint />}
           {s.blocks.map((block, i) => {
             if (block.kind === 'note' && !showNotes && !(m.type === 'edit' && m.index === i)) return null;

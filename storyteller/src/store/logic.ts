@@ -83,6 +83,8 @@ export function voiceOf(block: Block): Voice {
       return HEADING;
     case 'note':
       return NOTE;
+    case 'image':
+      return IMAGE;
   }
 }
 
@@ -106,6 +108,9 @@ export function draftOf(block: Block): string {
       return PREFIX_LIKE.test(block.text) ? `// ${block.text}` : block.text;
     case 'heading':
       return PREFIX_LIKE.test(block.text) ? `# ${block.text}` : block.text;
+    case 'image':
+      // A caption is edited as plain text: it never turns into another kind of block.
+      return block.text;
   }
 }
 
@@ -114,6 +119,7 @@ export function draftOf(block: Block): string {
  * speaker chip changed while editing.
  */
 export function revoice(block: Block, voice: Voice, characters: Character[]): Block {
+  if (block.kind === 'image') return block;
   const { id, text } = block;
   if (voice === NARRATION) return { kind: 'narration', id, text };
   if (voice === HEADING) return { kind: 'heading', id, text: text.replace(/\n/g, ' ') };
