@@ -14,6 +14,7 @@ import { type Backup, backupFile, backupPictures, exportBackup, parseBackup, res
 import { formatBytes } from '../images/compress';
 import { picturesUsage } from '../images/pictures';
 import { saveFile } from '../export/files';
+import { PACES, PACE_LABEL, paceOf } from '../reader/pace';
 import { db } from '../store/db';
 import { currentProfile } from '../store/profile';
 import { type Settings, settings, updateSettings } from '../store/settings';
@@ -194,6 +195,17 @@ export function SettingsScreen() {
         <Toggle id="set-enter" field="enterSends" label="Enter sends the line" hint="When off, Enter adds a line break and Ctrl+Enter sends" />
         <Toggle id="set-swipe" field="invertSwipe" label="Reverse swipe direction" hint="Swipe right for the next character" />
         <Toggle id="set-haptics" field="haptics" label="Vibration feedback" hint="On phones that support it" />
+      </Group>
+
+      <Group title="Reading">
+        <Row label="Pace" hint="How long each line stays lit when a story plays, line by line" stack>
+          <Segmented
+            label="Reading pace"
+            value={paceOf(s.readPace)}
+            options={PACES.map((p) => [p, PACE_LABEL[p]])}
+            onChange={(readPace) => updateSettings({ readPace })}
+          />
+        </Row>
       </Group>
 
       <Group title="Gestures">

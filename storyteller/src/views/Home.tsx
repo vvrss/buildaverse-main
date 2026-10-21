@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { BookOpen, Copy, FileUp, Layers, MoreHorizontal, PenLine, Plus, Search, Share, Trash2, Type } from 'lucide-preact';
+import { BookOpen, Copy, FileUp, Layers, MoreHorizontal, PenLine, Play, Plus, Search, Share, Trash2, Type } from 'lucide-preact';
 import { parseStory } from '../format/parser';
 import type { Block, Story } from '../format/types';
 import { cPath, go, storyPath } from '../router';
@@ -10,6 +10,7 @@ import { onBroadcast } from '../store/sync';
 import { changedSincePublished } from '../community/local';
 import { Picture } from '../images/Picture';
 import { Avatar, FilePicker, Row } from '../ui/controls';
+import { safeColor } from '../ui/color';
 import { Sheet, closeSheet, confirmAction, showSheet } from '../ui/overlay';
 import { ExportSheet } from './ExportSheet';
 import { ago } from './shared';
@@ -29,37 +30,34 @@ function greeting(): string {
   return 'Good evening';
 }
 
-/** The cover is a miniature of the story's opening exchange. */
+/** A small cover: the story's picture, or its first letter on its characters' colors. */
 function Cover({ card }: { card: Card }) {
-  const { story, preview } = card;
+  const { story } = card;
   const colors = story.characters.map((c) => c.color);
-  const a = colors[0] ?? '#8e5bd6';
-  const b = colors[1] ?? colors[0] ?? '#3a86ff';
-  const lead = story.characters[0]?.id;
-  const color = (id: string) => story.characters.find((c) => c.id === id)?.color ?? '#888';
+  const a = colors[0] ?? '#8e8ab0';
+  const b = colors[1] ?? colors[0] ?? '#8aa4b0';
   if (story.cover) {
     return (
       <div class="cover photo" aria-hidden="true">
-        <Picture pictureRef={story.cover} alt="" class="cover-photo" sizes="(max-width: 640px) 92vw, 300px" />
+        <Picture pictureRef={story.cover} alt="" class="cover-photo" sizes="58px" />
       </div>
     );
   }
   return (
-    <div class="cover" style={`--a:${a};--b:${b}`} aria-hidden="true">
-      {preview.length === 0 && <span class="cover-empty">Nothing written yet</span>}
-      {preview.map((blk) =>
-        blk.kind === 'line' ? (
-          <span key={blk.id} class={`cover-bubble${blk.speaker === lead ? ' right' : ''}`} style={`--c:${color(blk.speaker)}`}>
-            {blk.text.split('\n')[0]}
-          </span>
-        ) : (
-          <span key={blk.id} class="cover-narr">
-            {blk.text.split('\n')[0]}
-          </span>
-        ),
-      )}
+    <div class="cover" style={`--a:${safeColor(a)};--b:${safeColor(b)}`} aria-hidden="true">
+      {[...(story.title.trim() || '?')][0].toUpperCase()}
     </div>
   );
+}
+
+/** The story's first words, as a reminder of which one it is. */
+function previewText({ story, preview }: Card): string {
+  const first = preview[0];
+  if (!first) return 'Nothing written yet';
+  const text = first.text.split('\n')[0];
+  if (first.kind !== 'line') return text;
+  const who = story.characters.find((c) => c.id === first.speaker)?.name ?? first.speaker;
+  return `${who}: ${text}`;
 }
 
 function RenameSheet({ card, onDone }: { card: Card; onDone: () => void }) {
@@ -94,6 +92,7 @@ function StoryMenu({ card, onChange }: { card: Card; onChange: () => void }) {
     <Sheet title={story.title}>
       <div class="group-card">
         <Row icon={<BookOpen size={20} />} label="Open" onClick={act(() => go(storyPath(record.id)))} />
+        <Row icon={<Play size={20} />} label="Read" hint="Line by line, like lyrics" onClick={act(() => go(storyPath(record.id, 'read')))} />
         <Row icon={<Type size={20} />} label="Rename" onClick={act(() => void showSheet(<RenameSheet card={card} onDone={onChange} />))} />
         <Row
           icon={<Copy size={20} />}
@@ -155,7 +154,7 @@ export function Home() {
     () =>
       (records ?? []).map((record) => {
         const story = parseStory(record.text).story;
-        const preview = story.blocks.filter((b) => b.kind === 'line' || b.kind === 'narration').slice(0, 3);
+        const preview = story.blocks.filter((b) => b.kind === 'line' || b.kind === 'narration').slice(0, 1);
         return { record, story, preview };
       }),
     [records],
@@ -220,32 +219,27 @@ export function Home() {
         <Cover card={card} />
         <div class="card-body">
           <b class="card-title">{card.story.title}</b>
-          <span class="card-meta">
-            {card.record.lines} {card.record.lines === 1 ? 'line' : 'lines'} · {ago(card.record.updatedAt)}
-          </span>
-          {card.record.published && (
-            <span class={`badge${changedSincePublished(card.record) ? ' attention' : ''}`}>
-              {changedSincePublished(card.record) ? 'Changed since publishing' : `Published · #${card.record.published.number}`}
+          <span class="card-preview">{previewText(card)}</span>
+          <span class="card-sub">
+            <span class="card-meta">
+              {card.record.lines} {card.record.lines === 1 ? 'line' : 'lines'} · {ago(card.record.updatedAt)}
             </span>
-          )}
+            {card.record.published && (
+              <span class={`badge${changedSincePublished(card.record) ? ' attention' : ''}`}>
+                {changedSincePublished(card.record) ? 'Changed since publishing' : `Published · #${card.record.published.number}`}
+              </span>
+            )}
+          </span>
         </div>
       </a>
-      <div class="card-foot">
-        <span class="cast-stack">
-          {card.story.characters.slice(0, 4).map((c) => (
-            <Avatar key={c.id} name={c.name} color={c.color} size={24} />
-          ))}
-          {card.story.characters.length > 4 && <span class="more">+{card.story.characters.length - 4}</span>}
-        </span>
-        <button
-          type="button"
-          class="icon-btn"
-          aria-label={`More for ${card.story.title}`}
-          onClick={() => showSheet(<StoryMenu card={card} onChange={refresh} />)}
-        >
-          <MoreHorizontal size={20} />
-        </button>
-      </div>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label={`More for ${card.story.title}`}
+        onClick={() => showSheet(<StoryMenu card={card} onChange={refresh} />)}
+      >
+        <MoreHorizontal size={20} />
+      </button>
     </li>
   );
 
@@ -257,7 +251,7 @@ export function Home() {
           <h1 class="display">{profile.name}</h1>
         </div>
         <a class="avatar-link" href="#/account" aria-label="Your profile">
-          <Avatar name={profile.name} color={profile.color} size={44} />
+          <Avatar name={profile.name} color={profile.color} size={38} />
         </a>
       </header>
 
@@ -294,7 +288,7 @@ export function Home() {
       {records && cards.length === 0 && (
         <div class="empty-home">
           <div class="welcome-art small" aria-hidden="true">
-            <div class="mini-bubble right" style="--c:var(--accent)">
+            <div class="mini-bubble right" style="--c:#e76f51">
               Once upon a time…
             </div>
             <div class="mini-bubble" style="--c:#2a9d8f">
@@ -335,8 +329,8 @@ export function Home() {
       <ul class="cards">{loose.map(renderCard)}</ul>
 
       {cards.length > 0 && (
-        <button type="button" class="fab" onClick={() => create()} data-testid="new-story">
-          <Plus size={22} /> New story
+        <button type="button" class="fab" onClick={() => create()} data-testid="new-story" aria-label="New story" title="New story">
+          <Plus size={24} />
         </button>
       )}
     </div>

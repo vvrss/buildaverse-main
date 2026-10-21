@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { BookOpen, ChevronLeft, ChevronRight, EyeOff, Heart, MessageCircle, PencilLine, Trash2 } from 'lucide-preact';
 import { parseStory } from '../format/parser';
 import { cPath, go, goBack, storyPath } from '../router';
 import type { EpisodeDetail } from '../shared/api';
 import { currentProfile } from '../store/profile';
-import { settings } from '../store/settings';
+import { Lyrics } from '../reader/Lyrics';
+import { usePageTone, useReaderTone } from '../reader/tone';
 import { showToast } from '../store/storyStore';
 import { confirmAction } from '../ui/overlay';
-import { StoryLog } from '../views/StoryLog';
 import { ago } from '../views/shared';
 import { del, errorText, me, put } from './api';
 import { Comments } from './Comments';
@@ -57,15 +57,20 @@ function AuthorTools({ ep }: { ep: EpisodeDetail }) {
 export function Reader({ id, comment }: { id: string; comment: number | null }) {
   const { data: ep, error, reload, setData } = useApi<EpisodeDetail>(`/episodes/${id}`, [id]);
   const story = useMemo(() => (ep ? parseStory(ep.body).story : null), [ep?.body]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const coverMedia = ep ? (ep.cover ?? ep.story.cover ?? (story?.cover ? ep.media[story.cover] : null)) : null;
+  const tone = useReaderTone(story, coverMedia ? `/media/${coverMedia.id}/${coverMedia.widths[0]}.webp` : undefined);
+  usePageTone(ep ? tone : null);
 
   // Reading an episode moves your place in the story forward.
   useEffect(() => {
     if (ep && me.value) void put(`/episodes/${ep.id}/progress`).catch(() => {});
   }, [ep?.id, !!me.value]);
 
+  // The next episode opens at its top, unless a comment was linked.
   useEffect(() => {
-    if (!comment) window.scrollTo?.(0, 0);
-  }, [id]);
+    if (!comment && scroller.current) scroller.current.scrollTop = 0;
+  }, [ep?.id]);
 
   if (error) {
     return (
@@ -126,7 +131,7 @@ export function Reader({ id, comment }: { id: string; comment: number | null }) 
   };
 
   return (
-    <div class="screen c-page reader">
+    <div class="screen c-page reader ly-scroller" ref={scroller} style={`--ly-bg:${tone}`}>
       <header class="topbar reader-bar">
         <div class="topbar-row">
           <button type="button" class="icon-btn" aria-label="Back" onClick={() => goBack(cPath.story(ep.story.id))}>
@@ -139,78 +144,88 @@ export function Reader({ id, comment }: { id: string; comment: number | null }) 
         </div>
       </header>
 
-      <article class="reader-body">
-        <header class="episode-head">
-          <p class="muted small">
-            {ep.chapter.title} · Episode {ep.number}
-          </p>
-          <h1 class="display">{ep.title}</h1>
-          {ep.hidden && <span class="badge attention">Hidden by a moderator</span>}
-          <div class="episode-meta">
-            <UserChip user={ep.story.author} />
-            <span class="muted small">
-              {readTime(ep.words)} · {ago(ep.publishedAt)}
-            </span>
-          </div>
-        </header>
+      <RemotePictures media={ep.media}>
+        <article class="reader-body">
+          <Lyrics
+            key={ep.id}
+            story={story}
+            scroller={scroller}
+            head={
+              <header class="episode-head">
+                <p class="ly-eyebrow">
+                  {ep.chapter.title} · Episode {ep.number}
+                </p>
+                <h1>{ep.title}</h1>
+                {ep.hidden && <span class="badge attention">Hidden by a moderator</span>}
+                <div class="episode-meta">
+                  <UserChip user={ep.story.author} />
+                  <span class="muted small">
+                    {readTime(ep.words)} · {ago(ep.publishedAt)}
+                  </span>
+                </div>
+              </header>
+            }
+            foot={
+              <>
+                <div class="reader-actions">
+                  <button type="button" class={`btn${ep.viewer.liked ? ' on' : ''}`} aria-pressed={ep.viewer.liked} onClick={like} data-testid="like">
+                    <Heart size={16} fill={ep.viewer.liked ? 'currentColor' : 'none'} /> {ep.likes}
+                  </button>
+                  <a
+                    class="btn"
+                    href="#comments"
+                    onClick={(e) => (e.preventDefault(), document.getElementById('comments')?.scrollIntoView({ behavior: 'smooth' }))}
+                  >
+                    <MessageCircle size={16} /> {ep.comments}
+                  </a>
+                  {!ep.viewer.isAuthor && (
+                    <button type="button" class={`btn${ep.viewer.followingStory ? ' on' : ''}`} aria-pressed={ep.viewer.followingStory} onClick={follow}>
+                      <BookOpen size={16} /> {ep.viewer.followingStory ? 'Following' : 'Follow story'}
+                    </button>
+                  )}
+                </div>
 
-        <RemotePictures media={ep.media}>
-          <div class="reader-log" data-testid="reader-log">
-            <StoryLog story={story} leadOnRight={settings.value.leadOnRight} showNotes={false} />
-          </div>
-        </RemotePictures>
+                <nav class="episode-nav" aria-label="Episodes">
+                  {ep.prev ? (
+                    <a class="btn" href={`#${cPath.episode(ep.prev.id)}`}>
+                      <ChevronLeft size={16} /> #{ep.prev.number} {ep.prev.title}
+                    </a>
+                  ) : (
+                    <span />
+                  )}
+                  {ep.next ? (
+                    <a class="btn primary" href={`#${cPath.episode(ep.next.id)}`} data-testid="next-episode">
+                      #{ep.next.number} {ep.next.title} <ChevronRight size={16} />
+                    </a>
+                  ) : (
+                    <span class="muted small">{ep.viewer.followingStory ? "You'll hear about the next episode." : 'Latest episode'}</span>
+                  )}
+                </nav>
 
-        <div class="reader-actions">
-          <button type="button" class={`btn${ep.viewer.liked ? ' on' : ''}`} aria-pressed={ep.viewer.liked} onClick={like} data-testid="like">
-            <Heart size={16} /> {ep.likes}
-          </button>
-          <a class="btn" href="#comments" onClick={(e) => (e.preventDefault(), document.getElementById('comments')?.scrollIntoView({ behavior: 'smooth' }))}>
-            <MessageCircle size={16} /> {ep.comments}
-          </a>
-          {!ep.viewer.isAuthor && (
-            <button type="button" class={`btn${ep.viewer.followingStory ? ' on' : ''}`} aria-pressed={ep.viewer.followingStory} onClick={follow}>
-              <BookOpen size={16} /> {ep.viewer.followingStory ? 'Following' : 'Follow story'}
-            </button>
-          )}
-        </div>
+                {ep.viewer.isAuthor && <AuthorTools ep={ep} />}
 
-        <nav class="episode-nav" aria-label="Episodes">
-          {ep.prev ? (
-            <a class="btn" href={`#${cPath.episode(ep.prev.id)}`}>
-              <ChevronLeft size={16} /> #{ep.prev.number} {ep.prev.title}
-            </a>
-          ) : (
-            <span />
-          )}
-          {ep.next ? (
-            <a class="btn primary" href={`#${cPath.episode(ep.next.id)}`} data-testid="next-episode">
-              #{ep.next.number} {ep.next.title} <ChevronRight size={16} />
-            </a>
-          ) : (
-            <span class="muted small">{ep.viewer.followingStory ? "You'll hear about the next episode." : 'Latest episode'}</span>
-          )}
-        </nav>
+                <div id="comments">
+                  <Comments episodeId={ep.id} focusId={comment} onCount={(d) => setData({ ...ep, comments: ep.comments + d })} />
+                </div>
 
-        {ep.viewer.isAuthor && <AuthorTools ep={ep} />}
-
-        <div id="comments">
-          <Comments episodeId={ep.id} focusId={comment} onCount={(d) => setData({ ...ep, comments: ep.comments + d })} />
-        </div>
-
-        <footer class="page-foot">
-          {!ep.viewer.isAuthor && <ReportButton kind="episode" id={ep.id} what="this episode" />}
-          {ep.viewer.canModerate && (
-            <button type="button" class="link small" onClick={toggleHidden}>
-              <EyeOff size={14} /> {ep.hidden ? 'Unhide episode' : 'Hide episode'}
-            </button>
-          )}
-          {(ep.viewer.isAuthor || ep.viewer.canModerate) && (
-            <button type="button" class="link small danger" onClick={remove}>
-              <Trash2 size={14} /> Delete episode
-            </button>
-          )}
-        </footer>
-      </article>
+                <footer class="page-foot">
+                  {!ep.viewer.isAuthor && <ReportButton kind="episode" id={ep.id} what="this episode" />}
+                  {ep.viewer.canModerate && (
+                    <button type="button" class="link small" onClick={toggleHidden}>
+                      <EyeOff size={14} /> {ep.hidden ? 'Unhide episode' : 'Hide episode'}
+                    </button>
+                  )}
+                  {(ep.viewer.isAuthor || ep.viewer.canModerate) && (
+                    <button type="button" class="link small danger" onClick={remove}>
+                      <Trash2 size={14} /> Delete episode
+                    </button>
+                  )}
+                </footer>
+              </>
+            }
+          />
+        </article>
+      </RemotePictures>
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import { effect } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { BookOpen, ChevronLeft, Globe, Settings as SettingsIcon, Share, Signature } from 'lucide-preact';
+import { BookOpen, ChevronLeft, Globe, Play, Settings as SettingsIcon, Share, Signature } from 'lucide-preact';
 import { checkCommunity, me } from './community/api';
 import './community/account';
 import { CommunityView, PublicShell } from './community/CommunityRoutes';
 import { PublishScreen } from './community/Publish';
 import { takeReturn } from './community/ui';
 import { ShortcutsPage } from './gestures/GestureSettings';
+import { ReadScreen } from './reader/ReadScreen';
 import { type Tab, go, isCommunityRoute, route, storyPath } from './router';
 import { trackVisualViewport } from './shortcuts/keyboardViewport';
 import { currentProfile, hasProfiles, lockedProfile, profilesReady } from './store/profile';
@@ -114,6 +115,7 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
   }, [tab]);
 
   if (state === 'loading') return <div class="screen muted center">Opening…</div>;
+  if (tab === 'read') return <ReadScreen id={id} />;
 
   const back = async () => {
     await closeStory(id);
@@ -140,6 +142,9 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
             onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)}
           />
           <span class={`save ${saveState.value}`} title={saveTitle} aria-label={saveTitle} role="img" />
+          <a class="icon-btn" href={`#${storyPath(id, 'read')}`} aria-label="Read" title="Read it like lyrics">
+            <Play size={20} />
+          </a>
           <button
             type="button"
             class="icon-btn"
@@ -199,7 +204,7 @@ function Signed() {
         <main class="main" key={r.name}>
           <CommunityView r={r} />
         </main>
-        <BottomNav active="community" />
+        {r.name !== 'c-episode' && <BottomNav active="community" />}
       </>
     );
   }

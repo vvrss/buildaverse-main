@@ -10,7 +10,7 @@ interface Props {
   showNotes: boolean;
   /** The editor's position: the line being edited, or where new lines go. */
   mode?: Mode;
-  onSelect?: (index: number) => void;
+  onSelect: (index: number) => void;
 }
 
 /** A story as a chat: bubbles, narration, headings, pictures and portraits. */

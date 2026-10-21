@@ -7,7 +7,8 @@ Writing works entirely in the browser and offline. Stories and pictures are save
 ## The app
 
 - **Profiles** are the people on this device. Each one has a name, a color and an optional 4-digit PIN lock. Several people can share a device, and each person sees only their own stories, pictures, gestures and settings. A profile can sign in to its own **Community account**; a backup file moves a profile's stories to another device. The PIN keeps people out of the app, but the stories are not encrypted.
-- **Stories home**: story cards whose covers show the opening lines, plus search, sorting, rename, duplicate, export and delete (each delete asks first).
+- **Stories home**: a quiet list of your stories with their covers and first lines, plus search, sorting, rename, duplicate, export and delete (each delete asks first).
+- **Read** a story back line by line, like song lyrics: press ▶ in the editor (or Read in a story's menu). One line is lit at a time, the rest are dimmed, and the page glides up to the next line at a reading pace (Slow, Calm or Quick). Tap a line to jump to it, tap the lit one to move on, use the arrow keys and Space, or just scroll: scrolling pauses and lights the line you stop at. The background takes the color of the story's cover or first character. Community episodes are read the same way.
 - **Export** any story:
   - as a `.story` file
   - as a Markdown script
@@ -20,6 +21,7 @@ Writing works entirely in the browser and offline. Stories and pictures are save
 - **Settings**:
   - **Appearance**: theme (system, light, dark), text size, chat side for the first character, show notes
   - **Writing**: auto-switch speaker, Enter sends, swipe direction, vibration
+  - **Reading**: how quickly lines move on when a story plays
   - **Gestures**: recognition strictness
   - **Data**: backup and restore, how much storage is used, protecting stories from browser cleanup
   - **App**: install, updates, version

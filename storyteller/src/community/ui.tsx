@@ -1,6 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { BookOpen, Flag, Heart, Link2, RefreshCw, Users, WifiOff } from 'lucide-preact';
+import { Flag, Heart, Link2, RefreshCw, Users, WifiOff } from 'lucide-preact';
 import { cPath, go, shareUrl } from '../router';
 import type { ReportReason, StoryCard, UserSummary } from '../shared/api';
 import { currentProfile } from '../store/profile';
@@ -63,7 +63,9 @@ export function StoryCardView({ card }: { card: StoryCard }) {
           {card.cover ? (
             <RemoteImage media={card.cover} alt="" sizes="(max-width: 640px) 46vw, 240px" />
           ) : (
-            <span class="c-cover-title">{card.title}</span>
+            <span class="c-cover-initial" aria-hidden="true">
+              {[...(card.title.trim() || '?')][0].toUpperCase()}
+            </span>
           )}
           {card.hidden && <span class="badge attention">Hidden</span>}
         </div>
@@ -75,14 +77,18 @@ export function StoryCardView({ card }: { card: StoryCard }) {
           </span>
           <span class="c-stats muted small">
             <span>
-              <BookOpen size={13} /> {card.episodes}
+              {card.episodes} {card.episodes === 1 ? 'episode' : 'episodes'}
             </span>
-            <span>
-              <Heart size={13} /> {card.likes}
-            </span>
-            <span>
-              <Users size={13} /> {card.followers}
-            </span>
+            {card.likes > 0 && (
+              <span aria-label={`${card.likes} likes`}>
+                <Heart size={12} /> {card.likes}
+              </span>
+            )}
+            {card.followers > 0 && (
+              <span aria-label={`${card.followers} followers`}>
+                <Users size={12} /> {card.followers}
+              </span>
+            )}
           </span>
         </div>
       </a>

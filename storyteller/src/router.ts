@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals';
 
-export type Tab = 'chat' | 'text' | 'cast' | 'ai';
+export type Tab = 'chat' | 'text' | 'cast' | 'ai' | 'read';
 export type CommunityTab = 'discover' | 'following' | 'reading';
 export type Route =
   | { name: 'library' }
@@ -16,7 +16,7 @@ export type Route =
   | { name: 'c-notifications' }
   | { name: 'c-mod' };
 
-const TABS: Tab[] = ['chat', 'text', 'cast', 'ai'];
+const TABS: Tab[] = ['chat', 'text', 'cast', 'ai', 'read'];
 const COMMUNITY_TABS: CommunityTab[] = ['discover', 'following', 'reading'];
 
 function parse(hash: string): Route {

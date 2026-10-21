@@ -34,8 +34,8 @@ export default defineConfig({
         name: 'Storyteller',
         short_name: 'Storyteller',
         description: 'A private, offline writing app for dialog-driven stories.',
-        theme_color: '#5b3df5',
-        background_color: '#f7f6fb',
+        theme_color: '#f6f5f2',
+        background_color: '#f6f5f2',
         display: 'standalone',
         start_url: '.',
         icons: [

@@ -93,7 +93,10 @@ test('publish an episode with a picture, then read it in a fresh browser without
   await expect(reader.locator('.episode-head h1')).toHaveText('Storm');
   await expect(reader.getByTestId('reader-log')).toContainText('Did you hear that?');
   await expect(reader.getByTestId('reader-log')).not.toContainText('private note');
-  await expect(reader.locator('.reader-log .blk.image img')).toHaveAttribute('srcset', /\/media\/[0-9a-f]{64}\/\d+\.webp/);
+  await expect(reader.getByTestId('reader-log').locator('.ly-figure img')).toHaveAttribute('srcset', /\/media\/[0-9a-f]{64}\/\d+\.webp/);
+  // Episodes read line by line: the first line is lit, the rest wait their turn.
+  await expect(reader.getByTestId('reader-log').locator('[aria-current="true"]')).toHaveCount(1);
+  await expect(reader.getByTestId('ly-play')).toBeVisible();
   // The link-preview page works without the app and sends people to it.
   const preview = await reader.request.get(`/e/${episodeId}`);
   expect(await preview.text()).toContain('<meta property="og:title" content="The Lighthouse · #1 Storm">');

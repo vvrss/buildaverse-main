@@ -66,8 +66,8 @@ function Discover({ r }: { r: HomeRoute }) {
 
   return (
     <>
-      <div class="chip-row" role="group" aria-label="Genre">
-        <button type="button" class={`filter-chip${!r.genre ? ' on' : ''}`} onClick={() => nav({ genre: '' })}>
+      <div class="chip-row" role="group" aria-label="Genres and tags">
+        <button type="button" class={`filter-chip${!r.genre && !r.tag ? ' on' : ''}`} onClick={() => nav({ genre: '', tag: '' })}>
           All
         </button>
         {GENRES.map((g) => (
@@ -75,16 +75,13 @@ function Discover({ r }: { r: HomeRoute }) {
             {g}
           </button>
         ))}
+        {(tags.data?.items.length ?? 0) > 0 && <span class="chip-gap" aria-hidden="true" />}
+        {tags.data?.items.slice(0, 20).map((t) => (
+          <button key={t.tag} type="button" class={`filter-chip tag${r.tag === t.tag ? ' on' : ''}`} onClick={() => nav({ tag: r.tag === t.tag ? '' : t.tag })}>
+            #{t.tag}
+          </button>
+        ))}
       </div>
-      {(tags.data?.items.length ?? 0) > 0 && (
-        <div class="chip-row tags" role="group" aria-label="Tags">
-          {tags.data!.items.slice(0, 20).map((t) => (
-            <button key={t.tag} type="button" class={`filter-chip tag${r.tag === t.tag ? ' on' : ''}`} onClick={() => nav({ tag: r.tag === t.tag ? '' : t.tag })}>
-              #{t.tag}
-            </button>
-          ))}
-        </div>
-      )}
       <div class="c-toolbar">
         <span class="muted small">
           {r.q && `Results for “${r.q}”`}

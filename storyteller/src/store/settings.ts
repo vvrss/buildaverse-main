@@ -1,4 +1,5 @@
 import { effect, signal } from '@preact/signals';
+import type { Pace } from '../reader/pace';
 import { db } from './db';
 
 export interface Settings {
@@ -15,6 +16,8 @@ export interface Settings {
   /** Swipe right (instead of left) moves to the next character. */
   invertSwipe: boolean;
   gestureSensitivity: 'strict' | 'normal' | 'relaxed';
+  /** How quickly the reader moves on to the next line. */
+  readPace: Pace;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showNotes: true,
   invertSwipe: false,
   gestureSensitivity: 'normal',
+  readPace: 'calm',
 };
 
 export const GESTURE_THRESHOLDS: Record<Settings['gestureSensitivity'], number> = {

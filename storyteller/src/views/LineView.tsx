@@ -10,13 +10,12 @@ interface Props {
   isLead: boolean;
   showName: boolean;
   selected: boolean;
-  /** Left out for read-only logs (the Community reader). */
-  onSelect?: (index: number) => void;
+  onSelect: (index: number) => void;
 }
 
 export function LineView({ block, index, character, isLead, showName, selected, onSelect }: Props) {
-  const cls = `${selected ? ' selected' : ''}${onSelect ? '' : ' readonly'}`;
-  const select = onSelect ? () => onSelect(index) : undefined;
+  const cls = selected ? ' selected' : '';
+  const select = () => onSelect(index);
   const lines = (text: string) => text.split('\n').map((l, i) => <p key={i}>{l || '…'}</p>);
 
   switch (block.kind) {

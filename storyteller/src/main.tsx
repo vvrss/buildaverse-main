@@ -1,4 +1,3 @@
-import '@fontsource-variable/bricolage-grotesque';
 import '@fontsource-variable/figtree/wght.css';
 import { render } from 'preact';
 import { registerSW } from 'virtual:pwa-register';
