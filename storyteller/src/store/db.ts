@@ -14,6 +14,22 @@ export interface ProfileRecord {
   pin?: { salt: string; hash: string };
   createdAt: number;
   lastUsedAt: number;
+  /** The Community account this profile signed in to, for display; the server session is the real link. */
+  account?: { username: string; displayName: string };
+}
+
+/** Where a local story was published, so it can be updated instead of published again. */
+export interface PublishedLink {
+  episodeId: string;
+  storyId: string;
+  chapterId: string;
+  /** The online revision this copy matches. */
+  revision: number;
+  number: number;
+  storyTitle: string;
+  /** Hash of the text as it was published, to tell when it changed since. */
+  textHash: string;
+  at: number;
 }
 
 export interface StoryRecord {
@@ -26,6 +42,11 @@ export interface StoryRecord {
   lines: number;
   createdAt: number;
   updatedAt: number;
+  published?: PublishedLink;
+  /** Online story this one belongs to (set by publishing or "Write next episode"), for grouping on Home. */
+  series?: { storyId: string; title: string; chapterId?: string };
+  /** Client key for publishing this story as a new episode, so a retry never duplicates it. */
+  publishKey?: string;
 }
 
 export interface Point {

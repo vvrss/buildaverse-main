@@ -1,8 +1,13 @@
 import { effect } from '@preact/signals';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { BookOpen, ChevronLeft, Settings as SettingsIcon, Share, Signature } from 'lucide-preact';
+import { BookOpen, ChevronLeft, Globe, Settings as SettingsIcon, Share, Signature } from 'lucide-preact';
+import { checkCommunity, me } from './community/api';
+import './community/account';
+import { CommunityView, PublicShell } from './community/CommunityRoutes';
+import { PublishScreen } from './community/Publish';
+import { takeReturn } from './community/ui';
 import { ShortcutsPage } from './gestures/GestureSettings';
-import { type Tab, go, route, storyPath } from './router';
+import { type Tab, go, isCommunityRoute, route, storyPath } from './router';
 import { trackVisualViewport } from './shortcuts/keyboardViewport';
 import { currentProfile, hasProfiles, lockedProfile, profilesReady } from './store/profile';
 import { dbStatus } from './store/db';
@@ -25,7 +30,7 @@ import { TextMode } from './views/TextMode';
 let screenKey = '';
 effect(() => {
   const r = route.value;
-  const key = `${r.name}|${r.name === 'story' ? `${r.id}|${r.tab}` : ''}|${profileId.value ?? ''}`;
+  const key = `${JSON.stringify(r)}|${profileId.value ?? ''}`;
   if (key !== screenKey) {
     screenKey = key;
     closeAllSheets();
@@ -162,16 +167,21 @@ function StoryScreen({ id, tab }: { id: string; tab: Tab }) {
 
 const NAV = [
   { name: 'library', href: '#/', label: 'Stories', Icon: BookOpen },
+  { name: 'community', href: '#/c', label: 'Community', Icon: Globe },
   { name: 'shortcuts', href: '#/shortcuts', label: 'Gestures', Icon: Signature },
   { name: 'settings', href: '#/settings', label: 'Settings', Icon: SettingsIcon },
 ] as const;
 
 function BottomNav({ active }: { active: string }) {
+  const unread = me.value?.unreadNotifications ?? 0;
   return (
     <nav class="bottom-nav" aria-label="Main">
       {NAV.map(({ name, href, label, Icon }) => (
         <a key={name} href={href} class={active === name ? 'active' : ''} aria-current={active === name ? 'page' : undefined}>
-          <Icon size={22} />
+          <span class="badge-host">
+            <Icon size={22} />
+            {name === 'community' && unread > 0 && <span class="dot-badge" aria-label={`${unread} new`} />}
+          </span>
           <span>{label}</span>
         </a>
       ))}
@@ -182,6 +192,17 @@ function BottomNav({ active }: { active: string }) {
 function Signed() {
   const r = route.value;
   if (r.name === 'story') return <StoryScreen key={r.id} id={r.id} tab={r.tab} />;
+  if (r.name === 'publish') return <PublishScreen key={r.id} id={r.id} />;
+  if (isCommunityRoute(r)) {
+    return (
+      <>
+        <main class="main" key={r.name}>
+          <CommunityView r={r} />
+        </main>
+        <BottomNav active="community" />
+      </>
+    );
+  }
   const active = r.name === 'account' ? 'settings' : r.name;
   return (
     <>
@@ -199,9 +220,19 @@ function Signed() {
 export function App() {
   const shell = useRef<HTMLDivElement>(null);
   useEffect(() => (shell.current ? trackVisualViewport(shell.current) : undefined), []);
+  useEffect(() => void checkCommunity(), []);
+  // Someone who opened a shared link, then set up a profile, goes back to what they were reading.
+  const signedIn = !!currentProfile.value;
+  useEffect(() => {
+    if (!signedIn) return;
+    const back = takeReturn();
+    if (back) go(back, true);
+  }, [signedIn]);
 
+  const r = route.value;
   let content;
   if (!profilesReady.value) content = <div class="screen" />;
+  else if (!currentProfile.value && isCommunityRoute(r)) content = <PublicShell r={r} />;
   else if (lockedProfile.value) content = <LockScreen />;
   else if (!currentProfile.value) content = hasProfiles.value ? <ProfilePicker /> : <Welcome />;
   else content = <Signed />;

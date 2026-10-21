@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'preact/hooks';
-import { ClipboardCopy, FileCode2, FileText, Printer, Share2 } from 'lucide-preact';
+import { ClipboardCopy, FileCode2, FileText, Globe, Printer, Share2 } from 'lucide-preact';
 import { safeFilename, canShareFiles, printHtml, printIsUnavailable, saveFile, shareFile } from '../export/files';
 import { toPrintableHtml, toScript } from '../export/script';
 import { storyRefs } from '../format/images';
 import { serializeStory } from '../format/serializer';
 import { pictureDataUrls } from '../images/pictures';
 import type { Story } from '../format/types';
-import { showToast } from '../store/storyStore';
+import { community } from '../community/api';
+import { go } from '../router';
+import { showToast, storyId } from '../store/storyStore';
 import { Row, Switch } from '../ui/controls';
 import { Sheet, closeSheet } from '../ui/overlay';
 import { copyText } from './shared';
@@ -52,8 +54,19 @@ export function ExportSheet({ story }: { story: Story }) {
     done();
   };
 
+  const publish = () => {
+    const id = storyId.value;
+    done();
+    if (id) go(`/s/${encodeURIComponent(id)}/publish`);
+  };
+
   return (
     <Sheet title={`Export “${story.title}”`}>
+      {community.value === 'ready' && (
+        <div class="group-card">
+          <Row icon={<Globe size={20} />} label="Publish to Community…" hint="Share it as an episode anyone can read" onClick={publish} />
+        </div>
+      )}
       <div class="group-card">
         <Row icon={<FileCode2 size={20} />} label="Story file (.story)" hint="Edit with AI or import again later" onClick={storyFile} />
         <Row icon={<FileText size={20} />} label="Script (Markdown)" hint="Readable script for documents and sharing" onClick={script} />

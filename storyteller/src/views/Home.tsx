@@ -1,31 +1,24 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { BookOpen, Copy, FileUp, MoreHorizontal, PenLine, Plus, Search, Share, Trash2, Type } from 'lucide-preact';
+import { BookOpen, Copy, FileUp, Layers, MoreHorizontal, PenLine, Plus, Search, Share, Trash2, Type } from 'lucide-preact';
 import { parseStory } from '../format/parser';
 import type { Block, Story } from '../format/types';
-import { go, storyPath } from '../router';
+import { cPath, go, storyPath } from '../router';
 import { type StoryRecord, db, persistent } from '../store/db';
 import { currentProfile } from '../store/profile';
 import { createStory, deleteStory, duplicateStory, flushSave, renameStory, showToast } from '../store/storyStore';
 import { onBroadcast } from '../store/sync';
+import { changedSincePublished } from '../community/local';
 import { Picture } from '../images/Picture';
 import { Avatar, FilePicker, Row } from '../ui/controls';
 import { Sheet, closeSheet, confirmAction, showSheet } from '../ui/overlay';
 import { ExportSheet } from './ExportSheet';
+import { ago } from './shared';
 import { SAMPLE_STORY } from './sample';
 
 interface Card {
   record: StoryRecord;
   story: Story;
   preview: Block[];
-}
-
-function ago(ts: number): string {
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  if (s < 86400 * 7) return `${Math.round(s / 86400)} d ago`;
-  return new Date(ts).toLocaleDateString();
 }
 
 function greeting(): string {
@@ -203,6 +196,59 @@ export function Home() {
     await create(text);
   };
 
+  // Episodes written for the same online story sit together, in episode order.
+  const { groups, loose } = useMemo(() => {
+    const bySeries = new Map<string, Card[]>();
+    for (const c of visible) {
+      const key = c.record.series?.storyId;
+      if (key) bySeries.set(key, [...(bySeries.get(key) ?? []), c]);
+    }
+    const grouped = [...bySeries.entries()]
+      .filter(([, cards]) => cards.length > 1)
+      .map(([storyId, cards]) => ({
+        storyId,
+        title: cards[0].record.series!.title,
+        cards: [...cards].sort((x, y) => (x.record.published?.number ?? 1e9) - (y.record.published?.number ?? 1e9) || x.record.createdAt - y.record.createdAt),
+      }));
+    const inGroups = new Set(grouped.flatMap((g) => g.cards.map((c) => c.record.id)));
+    return { groups: grouped, loose: visible.filter((c) => !inGroups.has(c.record.id)) };
+  }, [visible]);
+
+  const renderCard = (card: Card) => (
+    <li key={card.record.id} class="card">
+      <a href={`#${storyPath(card.record.id)}`} class="card-link">
+        <Cover card={card} />
+        <div class="card-body">
+          <b class="card-title">{card.story.title}</b>
+          <span class="card-meta">
+            {card.record.lines} {card.record.lines === 1 ? 'line' : 'lines'} · {ago(card.record.updatedAt)}
+          </span>
+          {card.record.published && (
+            <span class={`badge${changedSincePublished(card.record) ? ' attention' : ''}`}>
+              {changedSincePublished(card.record) ? 'Changed since publishing' : `Published · #${card.record.published.number}`}
+            </span>
+          )}
+        </div>
+      </a>
+      <div class="card-foot">
+        <span class="cast-stack">
+          {card.story.characters.slice(0, 4).map((c) => (
+            <Avatar key={c.id} name={c.name} color={c.color} size={24} />
+          ))}
+          {card.story.characters.length > 4 && <span class="more">+{card.story.characters.length - 4}</span>}
+        </span>
+        <button
+          type="button"
+          class="icon-btn"
+          aria-label={`More for ${card.story.title}`}
+          onClick={() => showSheet(<StoryMenu card={card} onChange={refresh} />)}
+        >
+          <MoreHorizontal size={20} />
+        </button>
+      </div>
+    </li>
+  );
+
   return (
     <div class="screen home">
       <header class="home-head">
@@ -273,37 +319,20 @@ export function Home() {
 
       {query && visible.length === 0 && <p class="muted center">No stories match “{query}”.</p>}
 
-      <ul class="cards">
-        {visible.map((card) => (
-          <li key={card.record.id} class="card">
-            <a href={`#${storyPath(card.record.id)}`} class="card-link">
-              <Cover card={card} />
-              <div class="card-body">
-                <b class="card-title">{card.story.title}</b>
-                <span class="card-meta">
-                  {card.record.lines} {card.record.lines === 1 ? 'line' : 'lines'} · {ago(card.record.updatedAt)}
-                </span>
-              </div>
+      {groups.map((g) => (
+        <section key={g.storyId} class="series-group">
+          <h2 class="series-title">
+            <Layers size={18} /> {g.title}
+            <span class="muted small">{g.cards.length} episodes</span>
+            <a class="link small" href={`#${cPath.story(g.storyId)}`}>
+              Online
             </a>
-            <div class="card-foot">
-              <span class="cast-stack">
-                {card.story.characters.slice(0, 4).map((c) => (
-                  <Avatar key={c.id} name={c.name} color={c.color} size={24} />
-                ))}
-                {card.story.characters.length > 4 && <span class="more">+{card.story.characters.length - 4}</span>}
-              </span>
-              <button
-                type="button"
-                class="icon-btn"
-                aria-label={`More for ${card.story.title}`}
-                onClick={() => showSheet(<StoryMenu card={card} onChange={refresh} />)}
-              >
-                <MoreHorizontal size={20} />
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+          </h2>
+          <ul class="cards">{g.cards.map(renderCard)}</ul>
+        </section>
+      ))}
+
+      <ul class="cards">{loose.map(renderCard)}</ul>
 
       {cards.length > 0 && (
         <button type="button" class="fab" onClick={() => create()} data-testid="new-story">

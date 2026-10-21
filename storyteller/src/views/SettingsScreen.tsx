@@ -269,7 +269,11 @@ export function SettingsScreen() {
           />
         )}
         <Row icon={<BookText size={20} />} label="Story format guide" onClick={() => showSheet(<FormatGuide />)} />
-        <Row icon={<HardDrive size={20} />} label="Where are my stories?" hint="Only on this device, in this browser. Nothing is uploaded." />
+        <Row
+          icon={<HardDrive size={20} />}
+          label="Where are my stories?"
+          hint="Only on this device, in this browser, unless you publish an episode to the Community."
+        />
         <Row icon={<Info size={20} />} label="Version" hint={`Storyteller ${__APP_VERSION__}`} />
       </Group>
     </div>

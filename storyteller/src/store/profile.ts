@@ -7,6 +7,7 @@ import { checkPin, makePin } from './pin';
 import { profileId } from './session';
 import { loadSettings, previewAppearance, resetSettingsView } from './settings';
 import { deleteProfilePictures } from '../images/media';
+import { post } from '../community/api';
 import { collectUnusedPictures, releasePictureUrls } from '../images/pictures';
 import { closeStory, forgetLocalCopies, recoverJournals, resetEditor, showToast } from './storyStore';
 import { broadcast, onBroadcast } from './sync';
@@ -226,6 +227,8 @@ export async function deleteCurrentProfile() {
   const p = currentProfile.value;
   if (!p) return;
   const storyIds = (await db.listStories(p.id)).map((s) => s.id);
+  // A linked Community account stays, but this device's session for it ends.
+  if (p.account) await post('/auth/logout').catch(() => {});
   await leave();
   await db.deleteProfile(p.id);
   forgetLocalCopies(p.id, storyIds);

@@ -1,4 +1,3 @@
-import { Fragment } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { ArrowDown, ArrowDownToLine, ArrowUp, ListPlus, Trash2, X } from 'lucide-preact';
 import { GesturePad } from '../gestures/GesturePad';
@@ -16,7 +15,7 @@ import {
 import { settings } from '../store/settings';
 import { focusComposer } from '../store/ui';
 import { Composer } from './Composer';
-import { LineView } from './LineView';
+import { StoryLog } from './StoryLog';
 
 const keepFocus = (e: Event) => e.preventDefault();
 
@@ -88,8 +87,6 @@ export function Editor() {
   const log = useRef<HTMLDivElement>(null);
   const s = story.value;
   const m = mode.value;
-  const castById = new Map(s.characters.map((c) => [c.id, c]));
-  const lead = settings.value.leadOnRight ? s.characters[0]?.id : undefined;
   const showNotes = settings.value.showNotes;
 
   // Keep the line being edited, or the insertion point, in view.
@@ -127,28 +124,7 @@ export function Editor() {
           }}
         >
           {s.blocks.length === 0 && <EmptyHint />}
-          {s.blocks.map((block, i) => {
-            if (block.kind === 'note' && !showNotes && !(m.type === 'edit' && m.index === i)) return null;
-            const prev = s.blocks[i - 1];
-            const showName =
-              block.kind === 'line' && !(prev?.kind === 'line' && prev.speaker === block.speaker && !block.direction);
-            return (
-              <Fragment key={block.id}>
-                <LineView
-                  block={block}
-                  index={i}
-                  character={block.kind === 'line' ? castById.get(block.speaker) : undefined}
-                  isLead={block.kind === 'line' && block.speaker === lead}
-                  showName={showName}
-                  selected={m.type === 'edit' && m.index === i}
-                  onSelect={select}
-                />
-                {m.type === 'new' && m.at === i + 1 && m.at < s.blocks.length && (
-                  <div class="insert-caret" aria-hidden="true" />
-                )}
-              </Fragment>
-            );
-          })}
+          <StoryLog story={s} leadOnRight={settings.value.leadOnRight} showNotes={showNotes} mode={m} onSelect={select} />
         </div>
         <GesturePad />
       </div>

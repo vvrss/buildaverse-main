@@ -34,3 +34,13 @@ export function IssueList({ issues, onPick }: { issues: ParseIssue[]; onPick?: (
     </ul>
   );
 }
+
+/** "just now", "5 min ago", "3 h ago", "2 d ago", then the date. */
+export function ago(ts: number): string {
+  const s = Math.round((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 86400 * 7) return `${Math.round(s / 86400)} d ago`;
+  return new Date(ts).toLocaleDateString();
+}

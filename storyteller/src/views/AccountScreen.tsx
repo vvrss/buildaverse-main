@@ -15,6 +15,7 @@ import { showToast } from '../store/storyStore';
 import { Avatar, ColorSwatches, Group, Row } from '../ui/controls';
 import { PinPad } from '../ui/PinPad';
 import { Sheet, closeSheet, confirmAction, showSheet } from '../ui/overlay';
+import { AccountSection } from '../community/AccountForms';
 import { PinSetup } from './ProfileScreens';
 
 /** Asks for the current PIN, then runs `then`. */
@@ -137,6 +138,8 @@ export function AccountScreen() {
           <Row icon={<KeyRound size={20} />} label="Set a PIN" hint="Lock this profile with 4 digits" onClick={() => showSheet(<NewPinSheet />)} />
         )}
       </Group>
+
+      <AccountSection />
 
       <Group title="Profiles">
         <Row icon={<LogOut size={20} />} label="Switch profile" hint="Back to “Who’s writing?”" onClick={() => signOut()} />
