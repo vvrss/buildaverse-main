@@ -1,11 +1,18 @@
 {
   "name": "storyteller",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev:server": "tsx watch server/main.ts",
+    "dev:all": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && tsc -p server --noEmit && vite build && node scripts/build-server.mjs",
+    "build:app": "tsc --noEmit && vite build",
+    "start": "node dist-server/main.js",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -7,7 +7,7 @@ import { HttpError, badRequest } from '../http/errors';
 import { HOUR } from '../http/ratelimit';
 import { readJson } from '../http/validate';
 import { JobQueue, MAX_UPLOAD_BYTES, processImage } from '../media/process';
-import { BLOB_RE } from '../media/store';
+import { BLOB_RE, type MediaFormat } from '../media/store';
 import { mediaInfo } from '../queries';
 import { sha256 } from '../util';
 
@@ -56,7 +56,7 @@ export function imageRoutes() {
       const blob = sha256(buf);
       const now = deps.clock.now();
 
-      let row = deps.db.get<{ id: string; width: number; height: number; widths: string; bytes: number }>(
+      let row = deps.db.get<{ id: string; width: number; height: number; widths: string; avif: number; bytes: number }>(
         'SELECT * FROM blobs WHERE id = ?',
         blob,
       );
@@ -75,11 +75,12 @@ export function imageRoutes() {
         deps.media.write(blob, processed.variants);
         const bytes = processed.variants.reduce((sum, v) => sum + v.data.length, 0);
         deps.db.run(
-          'INSERT OR IGNORE INTO blobs (id, width, height, widths, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          'INSERT OR IGNORE INTO blobs (id, width, height, widths, avif, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
           blob,
           processed.width,
           processed.height,
           JSON.stringify(processed.widths),
+          processed.avif ? 1 : 0,
           bytes,
           now,
         );
@@ -100,24 +101,25 @@ export function imageRoutes() {
   return app;
 }
 
-/** GET /media/<blob>/<width>.webp: processed pictures, cached forever. */
+/** GET /media/<blob>/<width>.<webp|avif>: processed pictures, cached forever. */
 export function mediaRoutes() {
   const app = new Hono<AppEnv>();
   app.get('/media/:blob/:file', async (c) => {
     const deps = c.var.deps;
     const blob = c.req.param('blob');
-    const m = /^(\d{2,4})\.webp$/.exec(c.req.param('file'));
+    const m = /^(\d{2,4})\.(webp|avif)$/.exec(c.req.param('file'));
     if (!BLOB_RE.test(blob) || !m) return c.notFound();
     const width = Number(m[1]);
-    const row = deps.db.get<{ widths: string }>('SELECT widths FROM blobs WHERE id = ?', blob);
-    if (!row || !(JSON.parse(row.widths) as number[]).includes(width)) return c.notFound();
+    const format = m[2] as MediaFormat;
+    const row = deps.db.get<{ widths: string; avif: number }>('SELECT widths, avif FROM blobs WHERE id = ?', blob);
+    if (!row || !(JSON.parse(row.widths) as number[]).includes(width) || (format === 'avif' && !row.avif)) return c.notFound();
     let data: Buffer;
     try {
-      data = await deps.media.read(blob, width);
+      data = await deps.media.read(blob, width, format);
     } catch {
       return c.notFound();
     }
-    c.header('Content-Type', 'image/webp');
+    c.header('Content-Type', `image/${format}`);
     c.header('Cache-Control', 'public, max-age=31536000, immutable');
     c.header('Content-Security-Policy', "default-src 'none'; sandbox");
     c.header('Cross-Origin-Resource-Policy', 'same-origin');

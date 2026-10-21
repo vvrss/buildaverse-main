@@ -9,12 +9,15 @@ const MAX_PIXELS = 40_000_000;
 /** Widths served to readers; the largest never exceeds 1600 px. */
 export const WIDTHS = [160, 480, 960, 1600];
 const QUALITY = 78;
+/** AVIF is smaller at the same look; effort 2 keeps it to well under a second per picture. */
+const AVIF = { quality: 50, effort: 2 };
 
 /** Checks the real file type from its first bytes, whatever the request claims. */
-export function sniff(buf: Buffer): 'jpeg' | 'png' | 'webp' | null {
+export function sniff(buf: Buffer): 'jpeg' | 'png' | 'webp' | 'avif' | null {
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpeg';
   if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
   if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  if (buf.length >= 12 && buf.toString('ascii', 4, 8) === 'ftyp' && ['avif', 'avis'].includes(buf.toString('ascii', 8, 12))) return 'avif';
   return null;
 }
 
@@ -22,7 +25,8 @@ export interface Processed {
   width: number;
   height: number;
   widths: number[];
-  variants: { w: number; data: Buffer }[];
+  avif: boolean;
+  variants: { w: number; format: 'webp' | 'avif'; data: Buffer }[];
 }
 
 const options = { limitInputPixels: MAX_PIXELS, animated: false, failOn: 'error' as const };
@@ -35,15 +39,16 @@ const options = { limitInputPixels: MAX_PIXELS, animated: false, failOn: 'error'
  */
 export async function processImage(buf: Buffer): Promise<Processed> {
   const kind = sniff(buf);
-  if (!kind) throw new HttpError(415, 'unsupported_image', 'Only JPEG, PNG and WebP pictures can be uploaded.');
+  if (!kind) throw new HttpError(415, 'unsupported_image', 'Only JPEG, PNG, WebP and AVIF pictures can be uploaded.');
   let meta: Metadata;
   try {
     meta = await sharp(buf, options).metadata();
   } catch {
     throw new HttpError(422, 'bad_image', "That picture couldn't be read.");
   }
-  if (!meta.width || !meta.height || !['jpeg', 'png', 'webp'].includes(meta.format ?? '')) {
-    throw new HttpError(415, 'unsupported_image', 'Only JPEG, PNG and WebP pictures can be uploaded.');
+  const known = ['jpeg', 'png', 'webp'].includes(meta.format ?? '') || (meta.format === 'heif' && meta.compression === 'av1');
+  if (!meta.width || !meta.height || !known) {
+    throw new HttpError(415, 'unsupported_image', 'Only JPEG, PNG, WebP and AVIF pictures can be uploaded.');
   }
   if (meta.width * meta.height > MAX_PIXELS) {
     throw new HttpError(413, 'image_too_large', 'That picture has too many pixels.');
@@ -57,17 +62,14 @@ export async function processImage(buf: Buffer): Promise<Processed> {
   const variants: Processed['variants'] = [];
   try {
     for (const w of widths) {
-      const data = await sharp(buf, options)
-        .rotate()
-        .resize({ width: w, withoutEnlargement: true })
-        .webp({ quality: QUALITY, effort: 4 })
-        .toBuffer();
-      variants.push({ w, data });
+      const resized = sharp(buf, options).rotate().resize({ width: w, withoutEnlargement: true });
+      variants.push({ w, format: 'webp', data: await resized.clone().webp({ quality: QUALITY, effort: 4 }).toBuffer() });
+      variants.push({ w, format: 'avif', data: await resized.clone().avif(AVIF).toBuffer() });
     }
   } catch {
     throw new HttpError(422, 'bad_image', "That picture couldn't be processed.");
   }
-  return { width: top, height: Math.round((height * top) / width), widths, variants };
+  return { width: top, height: Math.round((height * top) / width), widths, avif: true, variants };
 }
 
 /** At most two pictures are processed at once; more than 16 waiting is refused. */

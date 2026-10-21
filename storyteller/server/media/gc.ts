@@ -4,8 +4,8 @@ const KEEP_UNUSED_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Removes pictures nothing uses any more:
- *  1. upload records older than a week that no published episode, story
- *     cover or chapter cover of that author refers to;
+ *  1. upload records older than a week that no published episode, or story,
+ *     chapter or episode cover of that author refers to;
  *  2. stored pictures with no upload record and no episode using them.
  * Files go first, then the row, so a crash leaves at worst a row to retry.
  */
@@ -19,6 +19,9 @@ export function collectGarbage(deps: Deps): { uploads: number; blobs: number } {
           SELECT 1 FROM episode_media em JOIN episodes e ON e.id = em.episode_id JOIN stories s ON s.id = e.story_id
            WHERE s.author_id = uploads.user_id AND em.ref = uploads.ref)
         AND NOT EXISTS (SELECT 1 FROM stories s WHERE s.author_id = uploads.user_id AND s.cover_ref = uploads.ref)
+        AND NOT EXISTS (
+          SELECT 1 FROM episodes e JOIN stories s ON s.id = e.story_id
+           WHERE s.author_id = uploads.user_id AND e.cover_ref = uploads.ref)
         AND NOT EXISTS (
           SELECT 1 FROM chapters c JOIN stories s ON s.id = c.story_id
            WHERE s.author_id = uploads.user_id AND c.cover_ref = uploads.ref)`,

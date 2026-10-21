@@ -30,6 +30,7 @@ export const MIGRATIONS: string[] = [
     width INTEGER NOT NULL,
     height INTEGER NOT NULL,
     widths TEXT NOT NULL,
+    avif INTEGER NOT NULL DEFAULT 0,
     bytes INTEGER NOT NULL,
     created_at INTEGER NOT NULL
   ) STRICT;

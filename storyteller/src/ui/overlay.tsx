@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals';
 import type { ComponentChildren, VNode } from 'preact';
-import { useEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef } from 'preact/hooks';
 import { X } from 'lucide-preact';
 
 /**
@@ -91,7 +91,8 @@ export function Sheet({ title, children, onClose }: SheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const close = () => (onClose ? onClose() : closeSheet());
 
-  useEffect(() => {
+  // A layout effect: focus and Esc work from the moment the sheet is on screen.
+  useLayoutEffect(() => {
     // Focus goes into the dialog (closeSheet brings it back to what opened it).
     const el = panel.current;
     const target =

@@ -25,6 +25,8 @@ export interface MediaInfo {
   w: number;
   h: number;
   widths: number[];
+  /** Also served as AVIF at the same widths. */
+  avif: boolean;
 }
 
 /** Picture code (`img:<ref>`) to its server copy. */

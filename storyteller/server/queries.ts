@@ -56,6 +56,7 @@ interface BlobRow {
   width: number;
   height: number;
   widths: string;
+  avif: number;
 }
 
 export const summary = (u: Pick<UserRow, 'username' | 'display_name' | 'color'>): UserSummary => ({
@@ -64,7 +65,7 @@ export const summary = (u: Pick<UserRow, 'username' | 'display_name' | 'color'>)
   color: u.color,
 });
 
-export const mediaInfo = (b: BlobRow): MediaInfo => ({ id: b.id, w: b.width, h: b.height, widths: JSON.parse(b.widths) });
+export const mediaInfo = (b: BlobRow): MediaInfo => ({ id: b.id, w: b.width, h: b.height, widths: JSON.parse(b.widths), avif: !!b.avif });
 
 /** Maps an author's picture codes to the stored pictures. */
 export function resolveRefs(db: Db, authorId: number, refs: string[]): MediaMap {
@@ -73,7 +74,7 @@ export function resolveRefs(db: Db, authorId: number, refs: string[]): MediaMap 
   for (let i = 0; i < unique.length; i += 200) {
     const chunk = unique.slice(i, i + 200);
     const rows = db.all<BlobRow & { ref: string }>(
-      `SELECT u.ref, b.id, b.width, b.height, b.widths FROM uploads u JOIN blobs b ON b.id = u.blob_id
+      `SELECT u.ref, b.id, b.width, b.height, b.widths, b.avif FROM uploads u JOIN blobs b ON b.id = u.blob_id
         WHERE u.user_id = ? AND u.ref IN (${chunk.map(() => '?').join(',')})`,
       authorId,
       ...chunk,
@@ -90,7 +91,7 @@ export function coverOf(db: Db, authorId: number, ref: string | null): MediaInfo
 /** An episode's own pictures, as linked when it was published. */
 export function episodeMedia(db: Db, episodeId: string): MediaMap {
   const rows = db.all<BlobRow & { ref: string }>(
-    `SELECT em.ref, b.id, b.width, b.height, b.widths FROM episode_media em JOIN blobs b ON b.id = em.blob_id WHERE em.episode_id = ?`,
+    `SELECT em.ref, b.id, b.width, b.height, b.widths, b.avif FROM episode_media em JOIN blobs b ON b.id = em.blob_id WHERE em.episode_id = ?`,
     episodeId,
   );
   const out: MediaMap = {};

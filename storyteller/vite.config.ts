@@ -12,7 +12,23 @@ export default defineConfig({
     VitePWA({
       // "prompt": a new version waits for the writer to reload, never mid-sentence.
       registerType: 'prompt',
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // The API, pictures and link-preview pages come from the server, never from the app shell.
+        navigateFallbackDenylist: [/^\/api\//, /^\/media\//, /^\/[se]\//],
+        runtimeCaching: [
+          {
+            // Published pictures never change (their address is their content hash).
+            urlPattern: ({ url }) => url.pathname.startsWith('/media/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'storyteller-media',
+              expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 60 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
+      },
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'Storyteller',
@@ -30,7 +46,12 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    // `npm run dev:all` runs the Community server on :8787 next to Vite.
+    proxy: Object.fromEntries(['/api', '/media', '/s/', '/e/'].map((p) => [p, 'http://127.0.0.1:8787'])),
+  },
   test: {
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'server/**/*.test.ts'],
+    testTimeout: 20_000,
   },
 });

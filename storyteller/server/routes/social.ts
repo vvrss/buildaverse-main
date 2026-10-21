@@ -189,7 +189,9 @@ export function socialRoutes() {
     const deps = c.var.deps;
     const user = requireUser(c);
     const rows = deps.db.all<StoryRow & { a_username: string; a_display_name: string; a_color: string; episode_id: string }>(
-      `${STORY_WITH_AUTHOR} JOIN reading_progress p ON p.story_id = s.id AND p.user_id = ?
+      `SELECT s.*, a.username AS a_username, a.display_name AS a_display_name, a.color AS a_color, p.episode_id
+         FROM stories s JOIN users a ON a.id = s.author_id
+         JOIN reading_progress p ON p.story_id = s.id AND p.user_id = ?
         WHERE ${PUBLIC_STORY} ORDER BY p.updated_at DESC LIMIT 30`,
       user.id,
     );
