@@ -16,8 +16,10 @@ import {
   compose,
   countLines,
   cycleVoice,
+  type Composed,
   draftOf,
   renameCharacterId,
+  revoice,
   voiceAfter,
   voiceOf,
 } from './logic';
@@ -44,7 +46,14 @@ export const saveState = signal<'saved' | 'pending' | 'error'>('saved');
 export const historyState = signal({ canUndo: false, canRedo: false });
 
 const history = new History<Snapshot>();
+/**
+ * The unsent line waiting at the end of the story while the composer is
+ * somewhere else (editing a line, or inserting mid-story). When the composer
+ * is at the end, that line is simply the draft and this is null.
+ */
 let pendingNew: { draft: string; voice: Voice } | null = null;
+/** A mid-story line written early (the page was hidden) and reopened, so Enter carries on inserting after it. */
+let resumeInsertId: string | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let toastKey = 0;
 /** updatedAt of the open story as this window last read or wrote it. */
@@ -55,6 +64,20 @@ let saveChain: Promise<void> = Promise.resolve();
 const flushHooks = new Set<() => void>();
 
 const snapshot = (): Snapshot => ({ story: story.value, mode: mode.value, voice: voice.value });
+
+function isAtEnd(m: Mode = mode.value): boolean {
+  return m.type === 'new' && m.at >= story.value.blocks.length;
+}
+
+/** The unsent line at the end of the story, wherever the composer is now. */
+function endDraft(): { draft: string; voice: Voice } | null {
+  return isAtEnd() ? { draft: draft.value, voice: voice.value } : pendingNew;
+}
+
+/** Text typed at a mid-story insertion point that isn't in the story yet. */
+function hasMidDraft(): boolean {
+  return mode.value.type === 'new' && !isAtEnd() && !!draft.value.trim();
+}
 
 function syncHistory() {
   historyState.value = { canUndo: history.canUndo, canRedo: history.canRedo };
@@ -212,17 +235,42 @@ function clearJournal(id: string) {
   storageRemove(JOURNAL + id);
 }
 
+interface SavedDraft {
+  draft: string;
+  voice: Voice;
+  profileId?: string;
+}
+
 function rememberDraft(id: string) {
-  const unsent = mode.value.type === 'new' ? { draft: draft.value, voice: voice.value } : pendingNew;
-  if (unsent && unsent.draft.trim()) storageSet(DRAFT + id, unsent);
+  const unsent = endDraft();
+  const owner = profileId.value;
+  if (unsent && unsent.draft.trim() && owner) storageSet(DRAFT + id, { ...unsent, profileId: owner } satisfies SavedDraft);
   else storageRemove(DRAFT + id);
+}
+
+/** Removes the crash journals and unsent drafts a deleted profile left in this browser. */
+export function forgetLocalCopies(owner: string, storyIds: string[] = []) {
+  for (const id of storyIds) {
+    storageRemove(JOURNAL + id);
+    storageRemove(DRAFT + id);
+  }
+  let keys: string[] = [];
+  try {
+    keys = Object.keys(localStorage).filter((k) => k.startsWith(JOURNAL) || k.startsWith(DRAFT));
+  } catch {
+    return;
+  }
+  for (const key of keys) {
+    if (storageGet<{ profileId?: string }>(key)?.profileId === owner) storageRemove(key);
+  }
 }
 
 function writeJournal() {
   const id = storyId.value;
   const owner = profileId.value;
   if (!id || !owner) return;
-  if (saveState.value === 'pending') {
+  // A failed save is journaled too: the database may have been closed by an update in another window.
+  if (saveState.value !== 'saved') {
     const entry: Journal = { id, profileId: owner, text: serializeStory(story.value), at: Date.now() };
     storageSet(JOURNAL + id, entry);
   }
@@ -251,7 +299,18 @@ export async function recoverJournals(owner: string) {
 
 function onPageHide() {
   if (!storyId.value) return;
-  settleEdit();
+  runFlushHooks();
+  batch(() => {
+    saveEditIfChanged();
+    // A half-typed mid-story line is written now so it can't be lost, then
+    // reopened, so coming back and typing on continues the same line.
+    const m = mode.value;
+    const at = m.type === 'new' ? m.at : -1;
+    if (flushInsertDraft()) {
+      resumeInsertId = story.value.blocks[at]?.id ?? null;
+      enterEdit(at);
+    }
+  });
   writeJournal();
   void flushSave();
 }
@@ -268,13 +327,20 @@ onBroadcast((msg) => {
   const id = storyId.value;
   if (!id) return;
   if (msg.type === 'story-saved' && msg.id === id && msg.updatedAt > knownUpdatedAt) {
-    if (saveState.value === 'saved' && !isEditDirty() && !draft.value.trim()) void reloadOpenStory();
+    // Text-tab typing becomes a pending save first, so the reload can never overwrite it.
+    runFlushHooks();
+    if (canReload()) void reloadOpenStory();
   } else if (msg.type === 'story-deleted' && msg.id === id && saveState.value === 'saved') {
     resetEditor();
     go('/', true);
     showToast('This story was deleted in another window.');
   }
 });
+
+/** Nothing here would be lost by swapping in another window's version. */
+function canReload(): boolean {
+  return saveState.value === 'saved' && !isEditDirty() && !hasMidDraft();
+}
 
 function isEditDirty(): boolean {
   const m = mode.value;
@@ -287,15 +353,18 @@ async function reloadOpenStory() {
   const id = storyId.value;
   if (!id) return;
   const record = await db.getStory(id);
-  if (!record || storyId.value !== id || saveState.value !== 'saved') return;
+  if (!record || storyId.value !== id || !canReload() || record.updatedAt <= knownUpdatedAt) return;
   const { story: s } = parseStory(record.text);
   knownUpdatedAt = record.updatedAt;
   batch(() => {
+    const m = mode.value;
+    const wasAtEnd = isAtEnd(m);
     story.value = s;
     history.clear();
     syncHistory();
-    if (mode.value.type === 'edit') exitToNew(s.blocks.length);
-    else mode.value = { type: 'new', at: Math.min(mode.value.at, s.blocks.length) };
+    // The unsent end line stays the end line, below the other window's new lines.
+    if (wasAtEnd) mode.value = { type: 'new', at: s.blocks.length };
+    else if (m.type === 'edit' || m.at >= s.blocks.length) exitToNew(s.blocks.length);
   });
 }
 
@@ -364,7 +433,7 @@ export async function openStory(id: string): Promise<boolean> {
   const recovered = !!journal && journal.profileId === record.profileId && journal.at > record.updatedAt;
   const text = recovered ? journal.text : record.text;
   const { story: s } = parseStory(text);
-  const saved = storageGet<{ draft: string; voice: Voice }>(DRAFT + id);
+  const saved = storageGet<SavedDraft>(DRAFT + id);
   const savedVoiceOk = !!saved && (saved.voice === NARRATION || s.characters.some((c) => c.id === saved.voice));
   batch(() => {
     storyId.value = id;
@@ -372,6 +441,7 @@ export async function openStory(id: string): Promise<boolean> {
     history.clear();
     syncHistory();
     pendingNew = null;
+    resumeInsertId = null;
     draft.value = saved?.draft ?? '';
     mode.value = { type: 'new', at: s.blocks.length };
     if (saved && savedVoiceOk) voice.value = saved.voice;
@@ -407,6 +477,7 @@ export function resetEditor() {
     history.clear();
     syncHistory();
     pendingNew = null;
+    resumeInsertId = null;
     draft.value = '';
     mode.value = { type: 'new', at: 0 };
     voice.value = NARRATION;
@@ -424,12 +495,14 @@ export function commit(sameVoice = false) {
   const editing = m.type === 'edit' ? s.blocks[m.index] : undefined;
 
   // Stepping through lines with Enter without changing them adds no undo steps.
-  if (editing && draft.value === draftOf(editing) && voice.value === voiceOf(editing)) {
-    navNext(false);
+  if (editing && m.type === 'edit' && draft.value === draftOf(editing) && voice.value === voiceOf(editing)) {
+    if (editing.id === resumeInsertId) {
+      batch(() => continueInsert(m.index, s.blocks, voiceAfter(s.blocks, m.index, s.characters)));
+    } else navNext(false);
     return;
   }
 
-  const composed = compose(draft.value, voice.value, s.characters, editing?.id);
+  const composed = editing ? composeEdit(editing, s) : compose(draft.value, voice.value, s.characters);
 
   if (!composed.block) {
     batch(() => {
@@ -452,7 +525,8 @@ export function commit(sameVoice = false) {
     const following =
       sameVoice || !settings.value.autoAlternate ? composed.voice : voiceAfter(blocks, index, composed.characters);
     if (m.type === 'edit') {
-      if (index + 1 < blocks.length) enterEdit(index + 1);
+      if (editing?.id === resumeInsertId) continueInsert(index, blocks, following);
+      else if (index + 1 < blocks.length) enterEdit(index + 1);
       else exitToNew(blocks.length, following);
     } else if (index + 1 >= blocks.length && pendingNew) {
       // An insert reached the end: bring back the line that was waiting there.
@@ -464,6 +538,29 @@ export function commit(sameVoice = false) {
   });
 }
 
+/** A reopened mid-story line was sent: carry on inserting after it, as before the page was hidden. */
+function continueInsert(index: number, blocks: Story['blocks'], following: Voice) {
+  resumeInsertId = null;
+  if (index + 1 >= blocks.length) {
+    exitToNew(blocks.length, following);
+    return;
+  }
+  mode.value = { type: 'new', at: index + 1 };
+  draft.value = '';
+  voice.value = following;
+}
+
+/**
+ * The block an edit produces. When only the speaker chip changed, the text is
+ * kept as it is, even if it starts like a prefix ("@tom is late").
+ */
+function composeEdit(block: Story['blocks'][number], s: Story): Composed {
+  if (draft.value === draftOf(block) && voice.value !== voiceOf(block)) {
+    return { block: revoice(block, voice.value, s.characters), characters: s.characters, voice: voice.value };
+  }
+  return compose(draft.value, voice.value, s.characters, block.id);
+}
+
 /** Applies a pending edit when navigating away from a block. */
 function saveEditIfChanged() {
   const m = mode.value;
@@ -471,7 +568,7 @@ function saveEditIfChanged() {
   const s = story.value;
   const block = s.blocks[m.index];
   if (!block || (draft.value === draftOf(block) && voice.value === voiceOf(block))) return;
-  const composed = compose(draft.value, voice.value, s.characters, block.id);
+  const composed = composeEdit(block, s);
   if (!composed.block) return;
   const blocks = [...s.blocks];
   blocks[m.index] = composed.block;
@@ -503,12 +600,9 @@ export function enterEdit(index: number) {
   const block = story.value.blocks[index];
   if (!block) return;
   batch(() => {
-    const m = mode.value;
     // Only the line waiting at the end of the story is kept aside; a draft at
     // a middle insertion point was already written by flushInsertDraft.
-    if (m.type === 'new' && (m.at >= story.value.blocks.length || !pendingNew)) {
-      pendingNew = { draft: draft.value, voice: voice.value };
-    }
+    if (isAtEnd()) pendingNew = { draft: draft.value, voice: voice.value };
     mode.value = { type: 'edit', index };
     draft.value = draftOf(block);
     voice.value = voiceOf(block);
@@ -519,8 +613,11 @@ export function enterEdit(index: number) {
 export function selectLine(index: number) {
   batch(() => {
     saveEditIfChanged();
-    const shift = mode.value.type === 'new' && index >= mode.value.at ? flushInsertDraft() : 0;
-    enterEdit(index + shift);
+    const m = mode.value;
+    const at = m.type === 'new' ? m.at : -1;
+    // The line being inserted is written first; lines after it move down by one.
+    const inserted = flushInsertDraft();
+    enterEdit(index + (inserted && index >= at ? 1 : 0));
   });
 }
 
@@ -580,6 +677,11 @@ export function insertBelow() {
   batch(() => {
     saveEditIfChanged();
     const s = story.value;
+    // Below the last line is the end of the story, where the unsent line waits.
+    if (m.index + 1 >= s.blocks.length) {
+      exitToNew(s.blocks.length);
+      return;
+    }
     // pendingNew (the unsent line at the end) stays put and comes back at the end.
     mode.value = { type: 'new', at: m.index + 1 };
     draft.value = '';
@@ -639,18 +741,28 @@ export function pickCharacter(n: number) {
 
 function restore(snap: Snapshot) {
   batch(() => {
+    // The unsent end line survives undo and redo, wherever the composer goes.
+    const end = endDraft();
+    const kept = end && end.draft.trim() ? end : null;
     story.value = snap.story;
-    voice.value = snap.voice;
+    resumeInsertId = null;
     const len = snap.story.blocks.length;
     const m = snap.mode;
     if (m.type === 'edit' && m.index < len) {
+      pendingNew = kept;
       mode.value = m;
       draft.value = draftOf(snap.story.blocks[m.index]);
       voice.value = voiceOf(snap.story.blocks[m.index]);
+    } else if (m.type === 'new' && m.at < len) {
+      pendingNew = kept;
+      mode.value = m;
+      draft.value = '';
+      voice.value = snap.voice;
     } else {
-      if (mode.value.type === 'edit') draft.value = pendingNew?.draft ?? '';
       pendingNew = null;
-      mode.value = { type: 'new', at: Math.min(m.type === 'new' ? m.at : len, len) };
+      mode.value = { type: 'new', at: len };
+      draft.value = kept?.draft ?? '';
+      voice.value = kept?.voice ?? snap.voice;
     }
     syncHistory();
     scheduleSave();
@@ -734,6 +846,8 @@ export function deleteCharacter(id: string): boolean {
 // -------------------------------------------------------------- whole text
 
 export function setTitle(title: string) {
+  // Text-tab typing is applied first, or its debounced apply would bring the old title back.
+  runFlushHooks();
   setStory({ ...story.value, title }, 'title');
 }
 

@@ -184,6 +184,10 @@ export function Home() {
       showToast("That file isn't a story. Pick a .story or text file.");
       return;
     }
+    if (/^\s*<(!doctype|html|\?xml|svg)\b/i.test(text)) {
+      showToast("That's a web page, not a story. Pick a .story or text file.");
+      return;
+    }
     if (text.trimStart().startsWith('{')) {
       showToast('That looks like a backup. Restore it from Settings → Data.');
       return;
@@ -227,7 +231,7 @@ export function Home() {
           >
             {sort === 'recent' ? 'Recent' : 'A–Z'}
           </button>
-          <FilePicker class="chip-btn" accept=".story,.txt,text/plain" onPick={importFile} label="Import a .story file">
+          <FilePicker class="chip-btn" accept=".story,.txt,text/plain" onPick={importFile} label="Import a .story file" testId="import-input">
             <FileUp size={16} />
           </FilePicker>
         </div>
@@ -252,7 +256,7 @@ export function Home() {
             <button type="button" class="btn" onClick={() => create(SAMPLE_STORY)}>
               Open sample
             </button>
-            <FilePicker accept=".story,.txt,text/plain" onPick={importFile}>
+            <FilePicker accept=".story,.txt,text/plain" onPick={importFile} testId="import-input">
               <FileUp size={18} /> Import
             </FilePicker>
           </div>

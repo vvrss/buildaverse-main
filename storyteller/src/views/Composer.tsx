@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { SendHorizontal } from 'lucide-preact';
 import { runAction } from '../shortcuts/actions';
 import { hotkeyAction, isComposing } from '../shortcuts/hotkeys';
@@ -26,6 +26,8 @@ export function Composer() {
    */
   const typed = useRef(0);
   const lastTyped = useRef<string | null>(null);
+  /** The text as the app last set it: undoing back to it means nothing of yours is left to undo. */
+  const baseline = useRef('');
   /** After Esc with nothing left to do, Tab moves focus on instead of switching speaker. */
   const releaseTab = useRef(false);
   const composedAt = useRef(0);
@@ -61,6 +63,7 @@ export function Composer() {
     if (lastTyped.current !== draft.value) {
       typed.current = 0;
       lastTyped.current = draft.value;
+      baseline.current = draft.value;
     }
   };
 
@@ -68,18 +71,24 @@ export function Composer() {
     const value = (e.currentTarget as HTMLTextAreaElement).value;
     const input = e as InputEvent;
     syncTyped();
-    if (input.inputType === 'historyUndo') typed.current = Math.max(0, typed.current - 1);
+    // Browsers merge a run of typing into one native undo step, so counting
+    // input events overshoots: back at the app's own text, nothing is left.
+    if (input.inputType === 'historyUndo') typed.current = value === baseline.current ? 0 : Math.max(1, typed.current - 1);
     else typed.current += 1;
     lastTyped.current = value;
     releaseTab.current = false;
     setSelected(0);
-    // Mid-composition text, and lines being edited, are taken as typed: no
-    // prefix rewriting (an edited line may start with its own marker).
-    if (input.isComposing || mode.value.type === 'edit') {
+    if (input.isComposing) {
       draft.value = value;
       return;
     }
     const state = readPrefix(value, characters);
+    // A line being edited may start with its own marker, so it is never
+    // rewritten; slash commands like /d still run.
+    if (mode.value.type === 'edit' && state.type !== 'run') {
+      draft.value = value;
+      return;
+    }
     if (state.type === 'switch') {
       setVoice(state.speaker);
       draft.value = state.rest;
@@ -100,6 +109,8 @@ export function Composer() {
   const onKeyDown = (e: KeyboardEvent) => {
     // Keys during IME composition (and Safari's confirming Enter) belong to the IME.
     if (isComposing(e) || (e.key === 'Enter' && performance.now() - composedAt.current < 60)) return;
+    // Any other key ends "Tab leaves the text box" after an Esc.
+    if (e.key !== 'Tab' && e.key !== 'Shift' && e.key !== 'Escape') releaseTab.current = false;
     if (e.key === 'Tab' && releaseTab.current && !open) return;
     if (open) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -137,6 +148,17 @@ export function Composer() {
     // Now that the text is final, apply typed prefixes like "@ana ".
     onInput(e);
   };
+  // Preact would register onCompositionEnd as a "CompositionEnd" event, which
+  // never fires, so this one is attached by hand (always the latest handler).
+  const compositionEnd = useRef(onCompositionEnd);
+  compositionEnd.current = onCompositionEnd;
+  useEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    const listener = (e: Event) => compositionEnd.current(e);
+    el.addEventListener('compositionend', listener);
+    return () => el.removeEventListener('compositionend', listener);
+  }, []);
 
   // Some mobile keyboards skip keydown for Enter; catch the line break here.
   const onBeforeInput = (e: InputEvent) => {
@@ -180,7 +202,7 @@ export function Composer() {
           onInput={onInput}
           onKeyDown={onKeyDown}
           onBeforeInput={onBeforeInput}
-          onCompositionEnd={onCompositionEnd}
+          onFocus={() => (releaseTab.current = false)}
         />
         <button
           type="button"

@@ -9,7 +9,7 @@ export interface DiffSummary {
 }
 
 /** Edit-distance budget: beyond this many changed lines the diff gives up. */
-const MAX_EDITS = 4000;
+const MAX_EDITS = 1500;
 
 /**
  * Line-based diff (Myers' O(ND) algorithm), used to preview AI edits before
@@ -61,7 +61,8 @@ function myers(a: string[], b: string[]): DiffOp[] | null {
   const trace: Int32Array[] = [];
 
   for (let d = 0; d <= max; d += 1) {
-    trace.push(v.slice());
+    // Round d only reads diagonals -d-1..d+1, so that window is all backtracking needs.
+    trace.push(v.slice(offset - d - 1, offset + d + 2));
     const next = v;
     for (let k = -d; k <= d; k += 2) {
       let x =
@@ -74,22 +75,23 @@ function myers(a: string[], b: string[]): DiffOp[] | null {
         y += 1;
       }
       next[offset + k] = x;
-      if (x >= n && y >= m) return backtrack(trace, a, b, offset, d);
+      if (x >= n && y >= m) return backtrack(trace, a, b, d);
     }
     v = next;
   }
   return null;
 }
 
-function backtrack(trace: Int32Array[], a: string[], b: string[], offset: number, dEnd: number): DiffOp[] {
+function backtrack(trace: Int32Array[], a: string[], b: string[], dEnd: number): DiffOp[] {
   const ops: DiffOp[] = [];
   let x = a.length;
   let y = b.length;
   for (let d = dEnd; d > 0; d -= 1) {
-    const v = trace[d];
+    const w = trace[d];
+    const v = (k: number) => w[k + d + 1];
     const k = x - y;
-    const prevK = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]) ? k + 1 : k - 1;
-    const prevX = v[offset + prevK];
+    const prevK = k === -d || (k !== d && v(k - 1) < v(k + 1)) ? k + 1 : k - 1;
+    const prevX = v(prevK);
     const prevY = prevX - prevK;
     while (x > prevX && y > prevY) {
       ops.push({ type: 'same', text: a[x - 1] });

@@ -232,3 +232,215 @@ test('#12 the wrong-PIN lockout survives a reload', async ({ page }) => {
   await expect(page.locator('.pin-error')).toContainText('Too many tries');
   await expect(page.locator('.home-head')).toHaveCount(0);
 });
+
+// ------------------------------------------------ re-check of the fixes
+
+test('re-check: after another window saves, the next line still goes at the end', async ({ page, context }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> one');
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await expect(other.locator('.blk.narration')).toHaveCount(1);
+  await send(page, '> two');
+  await send(page, '> three');
+  await expect(other.locator('.blk.narration')).toHaveCount(3);
+  await send(other, '> four');
+  await expect(other.locator('.blk.narration')).toHaveText(['one', 'two', 'three', 'four']);
+});
+
+test('re-check: tapping a line above an insert keeps the inserted line', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  for (const t of ['> One.', '> Two.', '> Three.']) await send(page, t);
+  await page.locator('.blk.narration').nth(1).click();
+  await page.getByRole('button', { name: 'Below' }).click();
+  await page.getByTestId('composer').fill('Inserted after two.');
+  await page.locator('.blk.narration').first().click();
+  await page.getByRole('button', { name: 'Stop editing' }).click();
+  await expect(page.locator('.blk.narration')).toHaveText(['One.', 'Two.', 'Inserted after two.', 'Three.']);
+});
+
+test('re-check: undo during an insert keeps the unsent end line at the end', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  for (const t of ['> One.', '> Two.', '> Three.']) await send(page, t);
+  const composer = page.getByTestId('composer');
+  await composer.fill('my unsent end line');
+  await page.locator('.blk.narration').nth(1).click();
+  await page.getByRole('button', { name: 'Below' }).click();
+  await send(page, 'X');
+  await page.locator('.blk.narration').first().click();
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await page.getByRole('button', { name: 'Stop editing' }).or(page.getByRole('button', { name: 'Jump to end' })).click();
+  await expect(page.locator('.blk.narration')).toHaveText(['One.', 'Two.', 'Three.']);
+  await expect(composer).toHaveValue('my unsent end line');
+});
+
+test('re-check: "+ Below" on the last line brings back the unsent line', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> One.');
+  const composer = page.getByTestId('composer');
+  await composer.fill('Unsent A');
+  await page.locator('.blk.narration').first().click();
+  await page.getByRole('button', { name: 'Below' }).click();
+  await expect(composer).toHaveValue('Unsent A');
+});
+
+test('re-check: Text-tab typing is never overwritten by another window', async ({ page, context }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> One.');
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await expect(other.locator('.blk.narration')).toHaveCount(1);
+  await page.getByRole('link', { name: 'Text' }).click();
+  const raw = page.getByTestId('raw-text');
+  await raw.fill(`${await raw.inputValue()}> Three (text tab).\n`);
+  await send(other, '> Two (window 2).');
+  await page.waitForTimeout(1500);
+  const all = (await storedTexts(page)).join('\n');
+  expect(all).toContain('Two (window 2).');
+  expect(all).toContain('Three (text tab).');
+});
+
+test('re-check: renaming right after typing in the Text tab keeps the new title', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await page.getByRole('link', { name: 'Text' }).click();
+  const raw = page.getByTestId('raw-text');
+  await raw.fill(`${await raw.inputValue()}> Night.\n`);
+  await page.locator('#story-title').fill('My Novel');
+  await page.waitForTimeout(1000);
+  await expect(page.locator('#story-title')).toHaveValue('My Novel');
+  await expect(raw).toHaveValue(/title: My Novel/);
+});
+
+test('re-check: changing the speaker of a line that starts with @name', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await page.getByRole('link', { name: 'Text' }).click();
+  await page.getByTestId('raw-text').fill('---\ntitle: T\ncharacters:\n  ana: Ana\n  tom: Tom\n---\n\n@ana: @tom is late.\n');
+  await page.getByRole('link', { name: 'Write' }).click();
+  await page.locator('.blk.line').first().click();
+  await page.locator('.chip', { hasText: 'Tom' }).click();
+  await page.getByTestId('composer').press('Enter');
+  await expect(page.locator('.blk.line .who')).toHaveText('Tom');
+  await expect.poll(async () => (await storedTexts(page))[0]).toContain('@tom: @tom is late.');
+});
+
+test('re-check: deleting a profile removes its unsent drafts from the browser', async ({ page, context }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> one');
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await other.getByTestId('composer').fill('> unsent in tab 2');
+  await page.goto('/#/account');
+  await page.getByText('Delete profile').first().click();
+  await page.getByRole('button', { name: 'Delete profile' }).last().click();
+  await expect(other.getByTestId('composer')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const keys = await page.evaluate(() => Object.keys(localStorage).filter((k) => /storyteller:(draft|journal):/.test(k)));
+  expect(keys).toEqual([]);
+});
+
+test('re-check: focus returns to the button that opened a sheet', async ({ page }) => {
+  await signUp(page);
+  await page.getByRole('button', { name: 'Open sample' }).click();
+  await expect(page.locator('.blk').first()).toBeVisible();
+  await page.goto('/');
+  const more = page.getByRole('button', { name: 'More for The Lighthouse' });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.sheet')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+  // From a menu item: focus goes back past the closed menu.
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(more).toBeFocused();
+});
+
+test('re-check: a web page is not imported as a story', async ({ page }) => {
+  await signUp(page);
+  await page.getByTestId('import-input').setInputFiles({
+    name: 'The Lighthouse (print).html',
+    mimeType: 'text/html',
+    buffer: Buffer.from('<!doctype html><html><head><title>x</title></head><body>hi</body></html>'),
+  });
+  await expect(page.getByTestId('toast')).toContainText('not a story');
+  await expect(page.locator('.card')).toHaveCount(0);
+});
+
+test('re-check: Ctrl+Z undoes your typing, then story lines', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> One.');
+  await send(page, '> Two.');
+  const composer = page.getByTestId('composer');
+  await composer.pressSequentially('A long sentence');
+  await composer.press('Control+z');
+  await expect(composer).toHaveValue('');
+  await composer.press('Control+z');
+  await expect(page.locator('.blk.narration')).toHaveCount(1);
+});
+
+test('re-check: after Esc, Tab switches speaker again once you come back', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '@ana Hi.');
+  await send(page, '@tom Hey.');
+  const composer = page.getByTestId('composer');
+  await composer.press('Escape');
+  await composer.press('Tab');
+  await expect(composer).not.toBeFocused();
+  await composer.click();
+  const before = await page.locator('.chip.active').innerText();
+  await composer.press('Tab');
+  await expect(composer).toBeFocused();
+  await expect(page.locator('.chip.active')).not.toHaveText(before);
+});
+
+test('re-check: /d deletes the line being edited', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  await send(page, '> One.');
+  await send(page, '> Two.');
+  await page.locator('.blk.narration').first().click();
+  const composer = page.getByTestId('composer');
+  await composer.fill('');
+  await composer.pressSequentially('/d ');
+  await expect(page.locator('.blk.narration')).toHaveText(['Two.']);
+});
+
+test('re-check: a prefix confirmed by an input method is applied', async ({ page }) => {
+  await signUp(page);
+  await newStory(page);
+  const composer = page.getByTestId('composer');
+  await composer.evaluate((el: HTMLTextAreaElement) => {
+    el.value = '> ';
+    el.dispatchEvent(new CompositionEvent('compositionend', { data: '> ' }));
+  });
+  await expect(page.locator('.chip.active')).toHaveText('Narration');
+});
+
+test('re-check: with a mouse, chips click and a swipe up opens the gesture pad', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
+  const page = await context.newPage();
+  await signUp(page);
+  await newStory(page);
+  await send(page, '@ana Hi.');
+  await send(page, '@tom Hey.');
+  await page.locator('.chip', { hasText: 'Ana' }).click();
+  await expect(page.locator('.chip.active')).toHaveText('Ana');
+  const box = (await page.getByTestId('voice-chips').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 8; i += 1) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - i * 10);
+  await page.mouse.up();
+  await expect(page.getByTestId('gesture-pad')).toBeVisible();
+  await context.close();
+});

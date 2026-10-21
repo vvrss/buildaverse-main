@@ -429,7 +429,7 @@ kbd {
 .mini-bubble b {
   display: block;
   font-size: 0.72rem;
-  color: color-mix(in srgb, var(--c) 62%, var(--text));
+  color: color-mix(in srgb, var(--c) 55%, var(--text));
 }
 
 .mini-narration {
@@ -989,7 +989,8 @@ kbd {
   font-size: 1rem;
 }
 
-.row + .row {
+/* ~ rather than +: a hidden file input can sit between two rows. */
+.row ~ .row {
   border-top: 1px solid var(--border);
 }
 
@@ -1388,7 +1389,7 @@ kbd {
   font-size: 0.78rem;
   font-weight: 700;
   /* Mixed toward the text color so every palette color stays readable. */
-  color: color-mix(in srgb, var(--c) 62%, var(--text));
+  color: color-mix(in srgb, var(--c) 55%, var(--text));
   margin: 0 12px 3px;
 }
 
@@ -1673,7 +1674,7 @@ kbd {
   padding: 6px 13px;
   border-radius: 999px;
   border: 1.5px solid color-mix(in srgb, var(--c, var(--muted)) 55%, transparent);
-  color: color-mix(in srgb, var(--c, var(--muted)) 62%, var(--text));
+  color: color-mix(in srgb, var(--c, var(--muted)) 55%, var(--text));
   font-weight: 700;
   font-size: 0.9rem;
   white-space: nowrap;
@@ -1691,7 +1692,8 @@ kbd {
 .chip.active {
   background: var(--c, var(--muted));
   border-color: var(--c, var(--muted));
-  color: var(--on-c, #fff);
+  /* Narration, heading and note chips have no --on-c: the surface color reads on --muted in both themes. */
+  color: var(--on-c, var(--surface));
   transform: scale(1.06);
 }
 
@@ -2168,4 +2170,11 @@ kbd {
 /* Wrappers that only carry the inert flag; they take no part in layout. */
 .inert-wrap {
   display: contents;
+}
+
+/* Narrow screens with large text: the banner's actions keep to one row, icons only. */
+@media (max-width: 359px) {
+  .banner .banner-text {
+    display: none;
+  }
 }

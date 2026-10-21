@@ -25,7 +25,7 @@ export function contrast(a: string, b: string): number {
 
 /** Black or white, whichever reads better on `background`. */
 export function readableOn(background: string): string {
-  return contrast(background, '#ffffff') >= contrast(background, '#111111') ? '#ffffff' : '#111111';
+  return contrast(background, '#ffffff') >= contrast(background, '#000000') ? '#ffffff' : '#000000';
 }
 
 /** CSS variables for an element tinted with `color`: the color itself and the text color on it. */

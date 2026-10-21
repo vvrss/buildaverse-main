@@ -189,3 +189,34 @@ describe('diffLines on long stories', () => {
     expect(rebuilt).toEqual(edited);
   });
 });
+
+describe('re-check fixes', () => {
+  it('unwraps fences indented under a list item', () => {
+    const reply =
+      '1. **Revised story:**\n\n   ```story\n   ---\n   title: T\n   ---\n\n   @ana: Hi there.\n     Still Ana.\n   > The wind.\n   ```\n\n2. Let me know!';
+    const text = extractStoryText(reply);
+    const { story } = parseStory(text);
+    expect(story.blocks.map((b) => b.text)).toEqual(['Hi there.\nStill Ana.', 'The wind.']);
+    expect(text).not.toContain('Let me know');
+  });
+
+  it('diffs exactly like a brute-force LCS on random texts', () => {
+    let seed = 7;
+    const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+    const lcs = (a: string[], b: string[]) => {
+      const t = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+      for (let i = a.length - 1; i >= 0; i -= 1)
+        for (let j = b.length - 1; j >= 0; j -= 1) t[i][j] = a[i] === b[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+      return t[0][0];
+    };
+    for (let round = 0; round < 300; round += 1) {
+      const pick = () => Array.from({ length: 1 + Math.floor(rand() * 12) }, () => 'abcd'[Math.floor(rand() * 4)]);
+      const a = pick();
+      const b = pick();
+      const d = diffLines(a.join('\n'), b.join('\n'));
+      expect(d.ops.filter((o) => o.type !== 'add').map((o) => o.text)).toEqual(a);
+      expect(d.ops.filter((o) => o.type !== 'del').map((o) => o.text)).toEqual(b);
+      expect(d.ops.filter((o) => o.type === 'same').length).toBe(lcs(a, b));
+    }
+  });
+});

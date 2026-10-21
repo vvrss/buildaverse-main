@@ -47,6 +47,21 @@ export function ShortcutBar() {
   const onDown = (e: PointerEvent) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>('[data-voice]')?.dataset.voice ?? null;
     drag.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, lastX: e.clientX, moved: false, target };
+    // A mouse leaves the thin chip strip before a swipe up is recognized (touch is
+    // captured anyway). Follow it on the window rather than capturing, which would
+    // retarget the click away from the chip.
+    if (e.pointerType === 'mouse') {
+      const move = (ev: PointerEvent) => {
+        if (!zone.current?.contains(ev.target as Node)) onMove(ev);
+      };
+      const up = (ev: PointerEvent) => {
+        onUp(ev);
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    }
   };
 
   const onMove = (e: PointerEvent) => {

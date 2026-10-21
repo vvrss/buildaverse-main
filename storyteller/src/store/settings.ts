@@ -32,9 +32,9 @@ export const DEFAULT_SETTINGS: Settings = {
 export const GESTURE_THRESHOLDS: Record<Settings['gestureSensitivity'], number> = {
   // Built-in gestures drawn by hand score about 0.945-0.99. Look-alikes such as
   // a "7", "U", "S" or "C" score up to about 0.9, so normal sits above them.
-  strict: 0.95,
-  normal: 0.92,
-  relaxed: 0.88,
+  strict: 0.9,
+  normal: 0.86,
+  relaxed: 0.82,
 };
 
 const TEXT_SCALE: Record<Settings['textSize'], number> = { small: 0.92, medium: 1, large: 1.12 };

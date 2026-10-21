@@ -13,27 +13,41 @@ const names = (story: Story) => new Map(story.characters.map((c) => [c.id, c.nam
 
 /** Escapes Markdown syntax inside user text, so it reads exactly as written. */
 export function mdEscape(text: string): string {
-  return text.replace(/[\\`*_[\]<>|~]/g, '\\$&');
+  return text.replace(/[\\`*_[\]<>|~]/g, '\\$&').replace(/&(?=#?\w+;)/g, '&amp;');
 }
 
-/** Escapes one line, including markers that only mean something at the start of a line. */
+/**
+ * Escapes a line that starts a Markdown line of its own (a continuation
+ * line), including markers that only mean something there. In "1. text" the
+ * backslash goes before the dot: Markdown only escapes punctuation.
+ */
 function mdLine(line: string): string {
-  return mdEscape(line).replace(/^(\s*)([#>+=-]|\d+[.)])/, '$1\\$2');
+  return mdEscape(line).replace(/^(\s*)(?:([#>+=-])|(\d+)([.)]))/, (_, sp: string, mark?: string, num?: string, dot?: string) =>
+    mark ? `${sp}\\${mark}` : `${sp}${num}\\${dot}`,
+  );
 }
 
-const mdText = (text: string) => text.split('\n').map(mdLine).join('  \n');
+/** A heading's text: a trailing " #" would otherwise be read as the closing marker. */
+const mdHeading = (text: string) => mdEscape(text).replace(/(\s)(#+)\s*$/, '$1\\$2');
+
+/** Block text: the first line follows a name or a "*", so only later lines need marker escapes. */
+const mdText = (text: string) =>
+  text
+    .split('\n')
+    .map((l, i) => (i === 0 ? mdEscape(l) : mdLine(l)))
+    .join('  \n');
 
 export function toScript(story: Story, { notes = false }: ScriptOptions = {}): string {
   const who = names(story);
   const cast = story.characters.map((c) => mdEscape(c.name)).join(', ');
-  const out: string[] = [`# ${mdEscape(story.title)}`, ''];
+  const out: string[] = [`# ${mdHeading(story.title)}`, ''];
   if (cast) out.push(`*Cast: ${cast}*`, '');
 
   for (const b of story.blocks) {
     const text = mdText(b.text);
     switch (b.kind) {
       case 'heading':
-        out.push('', `## ${mdEscape(b.text)}`, '');
+        out.push('', `## ${mdHeading(b.text)}`, '');
         break;
       case 'narration':
         out.push(`*${text}*`, '');

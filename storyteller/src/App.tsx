@@ -9,7 +9,7 @@ import { dbStatus } from './store/db';
 import { closeStory, openStory, saveState, setTitle, settleEdit, story, storyId, toast } from './store/storyStore';
 import { profileId } from './store/session';
 import { gesturePadOpen } from './store/ui';
-import { ScreenBehindSheets, SheetHost, closeAllSheets, showSheet } from './ui/overlay';
+import { Inert, ScreenBehindSheets, SheetHost, closeAllSheets, showSheet } from './ui/overlay';
 import { AccountScreen } from './views/AccountScreen';
 import { AiExchange } from './views/AiExchange';
 import { CharactersPanel } from './views/CharactersPanel';
@@ -51,7 +51,7 @@ function DbNotice() {
           <>
             <h2>Storyteller was updated</h2>
             <p>A newer version is running in another window. Reload to keep writing here.</p>
-            <button type="button" class="btn primary" onClick={() => location.reload()}>
+            <button type="button" class="btn primary" autoFocus onClick={() => location.reload()}>
               Reload
             </button>
           </>
@@ -206,8 +206,11 @@ export function App() {
 
   return (
     <div class="shell" ref={shell}>
-      <ScreenBehindSheets>{content}</ScreenBehindSheets>
-      <SheetHost />
+      {/* While the database is unusable, nothing behind the notice takes typing. */}
+      <ScreenBehindSheets blocked={dbStatus.value !== 'ok'}>{content}</ScreenBehindSheets>
+      <Inert on={dbStatus.value !== 'ok'}>
+        <SheetHost />
+      </Inert>
       <Toast />
       <DbNotice />
     </div>

@@ -26,7 +26,7 @@ const HALF_DIAGONAL = 0.5 * Math.sqrt(SIZE * SIZE + SIZE * SIZE);
 
 /** Strokes shorter than this (in px) are taps, not gestures. */
 export const MIN_STROKE_LENGTH = 30;
-export const DEFAULT_THRESHOLD = 0.92;
+export const DEFAULT_THRESHOLD = 0.86;
 /** The best action must beat the second-best by this much. */
 export const MIN_MARGIN = 0.04;
 

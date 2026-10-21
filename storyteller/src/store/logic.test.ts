@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Block, Character } from '../format/types';
 import { readPrefix } from '../shortcuts/prefixes';
-import { HEADING, NARRATION, NOTE, compose, cycleVoice, draftOf, voiceAfter, voiceOf } from './logic';
+import { HEADING, NARRATION, NOTE, compose, cycleVoice, draftOf, revoice, voiceAfter, voiceOf } from './logic';
 
 const cast: Character[] = [
   { id: 'ana', name: 'Ana', color: '#111111' },
@@ -125,5 +125,15 @@ describe('editing keeps a block what it is', () => {
     const korean = [{ id: '민수', name: '민수', color: '#111111' }];
     const decomposed = '민수'.normalize('NFD');
     expect(compose(`@${decomposed} 안녕`, NARRATION, korean, 'x').block).toMatchObject({ speaker: '민수' });
+  });
+});
+
+describe('revoice', () => {
+  it('changes only the speaker, even when the text starts like a prefix', () => {
+    const b: Block = { kind: 'line', id: 'x', speaker: 'ana', direction: 'quietly', text: '@tom is late.' };
+    expect(revoice(b, 'tom', cast)).toEqual({ ...b, speaker: 'tom' });
+    expect(revoice(b, NARRATION, cast)).toEqual({ kind: 'narration', id: 'x', text: '@tom is late.' });
+    expect(revoice(narr('> @ana walks in.'), 'ana', cast)).toMatchObject({ kind: 'line', speaker: 'ana', text: '> @ana walks in.' });
+    expect(revoice(b, 'nobody', cast)).toBe(b);
   });
 });

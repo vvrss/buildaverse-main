@@ -31,8 +31,8 @@ function EditBanner() {
     return (
       <div class="banner" onMouseDown={keepFocus}>
         <span class="banner-label">{m.at === 0 ? 'Inserting at the start' : `Inserting after line ${m.at}`}</span>
-        <button type="button" onClick={run(navEnd)}>
-          <ArrowDownToLine size={16} /> Jump to end
+        <button type="button" aria-label="Jump to end" onClick={run(navEnd)}>
+          <ArrowDownToLine size={16} /> <span class="banner-text">Jump to end</span>
         </button>
       </div>
     );
@@ -49,11 +49,11 @@ function EditBanner() {
         <button type="button" aria-label="Move down" onClick={run(() => moveCurrent(1))} disabled={m.index >= len - 1}>
           <ArrowDown size={16} />
         </button>
-        <button type="button" onClick={run(insertBelow)}>
-          <ListPlus size={16} /> Below
+        <button type="button" aria-label="Below" onClick={run(insertBelow)}>
+          <ListPlus size={16} /> <span class="banner-text">Below</span>
         </button>
-        <button type="button" class="danger" onClick={run(deleteCurrent)}>
-          <Trash2 size={16} /> Delete
+        <button type="button" class="danger" aria-label="Delete" onClick={run(deleteCurrent)}>
+          <Trash2 size={16} /> <span class="banner-text">Delete</span>
         </button>
         <button type="button" aria-label="Stop editing" onClick={run(navEnd)}>
           <X size={16} />

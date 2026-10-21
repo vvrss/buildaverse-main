@@ -12,24 +12,71 @@ import { X } from 'lucide-preact';
 interface Entry {
   id: number;
   node: VNode;
+  /** Where focus goes back to when the sheet closes. */
+  opener: HTMLElement | null;
 }
 
 export const sheets = signal<Entry[]>([]);
 let nextId = 0;
+/** Openers of sheets that just closed, so a sheet opened from a closing menu returns focus past it. */
+const closedOpeners = new Map<number, HTMLElement | null>();
+
+function openerFor(): HTMLElement | null {
+  const active = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+  if (!active || active === document.body) return null;
+  const host = active.closest<HTMLElement>('[data-sheet-id]');
+  if (!host) return active;
+  const id = Number(host.dataset.sheetId);
+  // Opened from a sheet that stays open: focus returns into it. From a menu that is
+  // closing: focus returns to whatever opened the menu.
+  if (sheets.value.some((s) => s.id === id)) return active;
+  return closedOpeners.get(id) ?? null;
+}
 
 export function showSheet(node: VNode): number {
   nextId += 1;
-  sheets.value = [...sheets.value, { id: nextId, node }];
+  sheets.value = [...sheets.value, { id: nextId, node, opener: openerFor() }];
   return nextId;
+}
+
+function restoreFocus(gone: Entry[]) {
+  for (const g of gone) {
+    closedOpeners.set(g.id, g.opener);
+    if (closedOpeners.size > 20) closedOpeners.delete(closedOpeners.keys().next().value!);
+  }
+  const opener = gone[gone.length - 1]?.opener;
+  let tries = 0;
+  const attempt = () => {
+    if (!opener?.isConnected) return;
+    // Something else took focus meanwhile (a sheet opened from the closing menu focuses itself).
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== opener) return;
+    // Wait until the screen behind has rendered without `inert`.
+    if (opener.closest('[inert]')) {
+      if (tries++ < 20) requestAnimationFrame(attempt);
+      return;
+    }
+    const hosts = document.querySelectorAll<HTMLElement>('.sheet-host');
+    const top = hosts[hosts.length - 1];
+    if (sheets.value.length > 0 && !top?.contains(opener)) return;
+    opener.focus({ preventScroll: true });
+  };
+  setTimeout(attempt, 0);
 }
 
 export function closeSheet(id?: number) {
   const list = sheets.value;
-  sheets.value = id === undefined ? list.slice(0, -1) : list.filter((s) => s.id !== id);
+  const gone = id === undefined ? list.slice(-1) : list.filter((s) => s.id === id);
+  if (gone.length === 0) return;
+  sheets.value = list.filter((s) => !gone.includes(s));
+  restoreFocus(gone);
 }
 
 export function closeAllSheets() {
+  const gone = sheets.value;
+  if (gone.length === 0) return;
   sheets.value = [];
+  restoreFocus(gone.slice(0, 1));
 }
 
 interface SheetProps {
@@ -45,8 +92,7 @@ export function Sheet({ title, children, onClose }: SheetProps) {
   const close = () => (onClose ? onClose() : closeSheet());
 
   useEffect(() => {
-    // Focus goes into the dialog and comes back to what opened it.
-    const opener = document.activeElement as HTMLElement | null;
+    // Focus goes into the dialog (closeSheet brings it back to what opened it).
     const el = panel.current;
     const target =
       el?.querySelector<HTMLElement>('[data-autofocus]') ??
@@ -60,10 +106,7 @@ export function Sheet({ title, children, onClose }: SheetProps) {
       close();
     };
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   return (
@@ -84,13 +127,10 @@ export function Sheet({ title, children, onClose }: SheetProps) {
 }
 
 /** Makes everything except the top sheet unreachable (no focus, no clicks, hidden from screen readers). */
-function Inert({ on, children }: { on: boolean; children: ComponentChildren }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.inert = on;
-  }, [on]);
+export function Inert({ on, children, sheetId }: { on: boolean; children: ComponentChildren; sheetId?: number }) {
+  // Set during render, not in an effect, so focus can move back as soon as a sheet closes.
   return (
-    <div ref={ref} class="inert-wrap">
+    <div class={sheetId === undefined ? 'inert-wrap' : 'inert-wrap sheet-host'} inert={on} data-sheet-id={sheetId}>
       {children}
     </div>
   );
@@ -101,7 +141,7 @@ export function SheetHost() {
   return (
     <>
       {list.map((s, i) => (
-        <Inert key={s.id} on={i < list.length - 1}>
+        <Inert key={s.id} sheetId={s.id} on={i < list.length - 1}>
           {s.node}
         </Inert>
       ))}
@@ -110,8 +150,8 @@ export function SheetHost() {
 }
 
 /** Wraps the screen so it is inert while any sheet is open. */
-export function ScreenBehindSheets({ children }: { children: ComponentChildren }) {
-  return <Inert on={sheets.value.length > 0}>{children}</Inert>;
+export function ScreenBehindSheets({ children, blocked = false }: { children: ComponentChildren; blocked?: boolean }) {
+  return <Inert on={blocked || sheets.value.length > 0}>{children}</Inert>;
 }
 
 interface ConfirmOptions {

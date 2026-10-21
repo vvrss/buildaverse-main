@@ -19,8 +19,11 @@ export function storyForAi(storyText: string, request = ''): string {
 /** Pulls the story text out of an AI reply (fenced block, or from the first "---"). */
 export function extractStoryText(raw: string): string {
   const text = raw.replace(/\r\n?/g, '\n');
-  // Fences of ``` or ~~~ (three or more), with any info string ("story", " story", none).
-  const fences = [...text.matchAll(/^(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^\1[ \t]*$/gm)].map((m) => m[2]);
+  // Fences of ``` or ~~~ (three or more), with any info string ("story", " story", none),
+  // indented by up to 3 spaces as AIs do under a list item; the body loses that indent.
+  const fences = [...text.matchAll(/^( {0,3})(`{3,}|~{3,})[^\n]*\n([\s\S]*?)^ {0,3}\2[`~]*[ \t]*$/gm)].map((m) =>
+    m[1] ? m[3].replace(new RegExp(`^ {0,${m[1].length}}`, 'gm'), '') : m[3],
+  );
   if (fences.length > 0) {
     const scored = fences
       .map((body) => ({ body, score: (body.match(/^\s*(@|>|#|---)/gm) ?? []).length }))
@@ -32,7 +35,7 @@ export function extractStoryText(raw: string): string {
   if (headerAt > 0) {
     // An unclosed fence after the story ends it; drop the chat that follows.
     const rest = lines.slice(headerAt);
-    const end = rest.findIndex((l, i) => i > 0 && /^(`{3,}|~{3,})\s*$/.test(l));
+    const end = rest.findIndex((l, i) => i > 0 && /^\s*(`{3,}|~{3,})\s*$/.test(l));
     return (end === -1 ? rest : rest.slice(0, end)).join('\n');
   }
   return text;

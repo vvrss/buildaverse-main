@@ -6,7 +6,7 @@ import { type ProfileRecord, db } from './db';
 import { checkPin, makePin } from './pin';
 import { profileId } from './session';
 import { loadSettings, previewAppearance, resetSettingsView } from './settings';
-import { closeStory, recoverJournals, showToast } from './storyStore';
+import { closeStory, forgetLocalCopies, recoverJournals, resetEditor, showToast } from './storyStore';
 import { broadcast, onBroadcast } from './sync';
 import { gesturePadOpen } from './ui';
 
@@ -157,10 +157,12 @@ export async function verifyCurrentPin(pin: string): Promise<string | null> {
 
 // ------------------------------------------------------------- leaving
 
-async function leave() {
+async function leave({ discard = false } = {}) {
   gesturePadOpen.value = false;
   // Saves and clears the editor, so nothing from this profile shows in the next.
-  await closeStory();
+  // A profile deleted elsewhere has nothing left to save into.
+  if (discard) resetEditor();
+  else await closeStory();
   // The next profile starts on its own home screen, not on this one's last page.
   go('/', true);
   batch(() => {
@@ -218,8 +220,10 @@ export async function patchProfile(change: (p: ProfileRecord) => ProfileRecord) 
 export async function deleteCurrentProfile() {
   const p = currentProfile.value;
   if (!p) return;
+  const storyIds = (await db.listStories(p.id)).map((s) => s.id);
   await leave();
   await db.deleteProfile(p.id);
+  forgetLocalCopies(p.id, storyIds);
   await db.setGlobal(`pinLock:${p.id}`, { failures: 0, until: 0 });
   broadcast({ type: 'profile-deleted', id: p.id });
   await refresh();
@@ -246,10 +250,11 @@ onBroadcast((msg) => {
   } else if (msg.type === 'profile-deleted') {
     void (async () => {
       if (currentProfile.value?.id === msg.id || lockedProfile.value?.id === msg.id) {
-        await leave();
+        await leave({ discard: true });
         lockedProfile.value = null;
         showToast('This profile was deleted in another window.');
       }
+      forgetLocalCopies(msg.id);
       await refresh();
     })();
   }

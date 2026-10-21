@@ -22,9 +22,14 @@ describe('hotkeys (non-Mac)', () => {
     expect(hotkeyAction(key({ key: 'n', code: 'KeyN', altKey: true }), ctx)).toBe('voice.narration');
   });
 
-  it('does not take Alt+key when it types a different character', () => {
-    expect(hotkeyAction(key({ key: 'ñ', code: 'KeyN', altKey: true }), ctx)).toBeNull();
+  it('matches Alt shortcuts by key position, so Alt+1 works on AZERTY', () => {
     expect(hotkeyAction(key({ key: '2', code: 'Digit2', altKey: true }), ctx)).toBe('voice.pick:1');
+    expect(hotkeyAction(key({ key: '&', code: 'Digit1', altKey: true }), ctx)).toBe('voice.pick:0');
+  });
+
+  it('redoes with Ctrl+Y on QWERTZ, where Y sits on the Z key', () => {
+    expect(hotkeyAction(key({ key: 'y', code: 'KeyZ', ctrlKey: true }), ctx)).toBe('history.redo');
+    expect(hotkeyAction(key({ key: 'z', code: 'KeyY', ctrlKey: true }), ctx)).toBe('history.undo');
   });
 
   it('matches undo and redo by physical key on any layout', () => {

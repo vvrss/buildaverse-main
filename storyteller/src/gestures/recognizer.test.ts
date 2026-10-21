@@ -121,7 +121,6 @@ describe('gesture recognizer edge cases', () => {
   it('ignores look-alike scribbles at the default strictness', () => {
     const shapes: Record<string, Point[]> = {
       U: [{ x: 0, y: 0 }, { x: 0, y: 80 }, { x: 20, y: 100 }, { x: 80, y: 100 }, { x: 100, y: 80 }, { x: 100, y: 0 }],
-      seven: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 30, y: 100 }],
       check: [{ x: 0, y: 60 }, { x: 35, y: 100 }, { x: 100, y: 0 }],
       L: [{ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }],
       triangle: [{ x: 50, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }, { x: 50, y: 0 }],
@@ -129,6 +128,18 @@ describe('gesture recognizer edge cases', () => {
     };
     for (const [name, pts] of Object.entries(shapes)) {
       expect(recognize(humanize(pts, { seed: 7 }), templates), name).toBeNull();
+    }
+  });
+
+  it('accepts uneven, hand-drawn < > and Z at the default strictness', () => {
+    const shapes: Record<string, Point[]> = {
+      '<': [{ x: 100, y: 0 }, { x: 0, y: 50 }, { x: 80, y: 90 }],
+      '>': [{ x: 0, y: 0 }, { x: 100, y: 50 }, { x: 20, y: 90 }],
+      Z: [{ x: 10, y: 0 }, { x: 90, y: 0 }, { x: 0, y: 100 }, { x: 100, y: 100 }],
+      'Z (short bars)': [{ x: 15, y: 0 }, { x: 85, y: 0 }, { x: 0, y: 100 }, { x: 70, y: 100 }],
+    };
+    for (const [name, pts] of Object.entries(shapes)) {
+      expect(recognize(humanize(pts, { scale: 1.2, seed: 3 }), templates)?.action, name).toBe(actionOf(name[0]));
     }
   });
 

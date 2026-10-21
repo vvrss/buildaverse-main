@@ -109,6 +109,20 @@ export function draftOf(block: Block): string {
   }
 }
 
+/**
+ * The same block in another voice, text untouched: used when only the
+ * speaker chip changed while editing.
+ */
+export function revoice(block: Block, voice: Voice, characters: Character[]): Block {
+  const { id, text } = block;
+  if (voice === NARRATION) return { kind: 'narration', id, text };
+  if (voice === HEADING) return { kind: 'heading', id, text: text.replace(/\n/g, ' ') };
+  if (voice === NOTE) return { kind: 'note', id, text };
+  if (!characters.some((c) => c.id === voice)) return block;
+  const direction = block.kind === 'line' ? block.direction : undefined;
+  return direction ? { kind: 'line', id, speaker: voice, direction, text } : { kind: 'line', id, speaker: voice, text };
+}
+
 export interface Composed {
   block: Block | null;
   /** Characters created on the fly by typing an unknown `@name`. */

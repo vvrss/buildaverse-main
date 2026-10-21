@@ -83,3 +83,20 @@ describe('backup', () => {
     expect(plan.add.map((s) => s.id)).toEqual(['b']);
   });
 });
+
+describe('Markdown escaping (re-check)', () => {
+  const md = (body: string) =>
+    toScript(parseStory(`---\ntitle: Room #\ncharacters:\n  ana: Ana  #e76f51\n---\n\n${body}\n`).story);
+
+  it('shows numbers as written, with no stray backslash', () => {
+    const out = md('@ana: 1999. What a year.\n  2) Close it\n> 3.14 is pi');
+    expect(out).toContain('**ANA**: 1999. What a year.  \n2\\) Close it');
+    expect(out).toContain('*3.14 is pi*');
+  });
+
+  it('keeps a trailing # in titles and entities as text', () => {
+    const out = md('@ana: &copy; me');
+    expect(out).toContain('# Room \\#');
+    expect(out).toContain('&amp;copy; me');
+  });
+});
