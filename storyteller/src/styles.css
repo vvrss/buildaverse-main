@@ -240,6 +240,7 @@ h3 {
   background: var(--surface-2);
 }
 
+input:not([type]),
 input[type='text'],
 input[type='search'],
 input[type='password'],
@@ -443,7 +444,7 @@ kbd {
   font-size: 2.6rem !important;
 }
 
-.lead {
+.welcome-lead {
   margin: -6px 0 0;
   color: var(--muted);
   font-size: 1.1rem;
@@ -2288,7 +2289,9 @@ kbd {
   flex-shrink: 0;
 }
 
-.portrait-btn {
+.portrait-btn,
+.page .portrait-btn {
+  min-height: 0;
   border: none;
   background: none;
   padding: 0;
@@ -2301,7 +2304,10 @@ kbd {
   outline-offset: 3px;
 }
 
-.link {
+.link,
+.page .link {
+  min-height: 0;
+  border-radius: 6px;
   border: none;
   background: none;
   padding: 2px 4px;
@@ -2324,7 +2330,9 @@ kbd {
   margin-bottom: 14px;
 }
 
-.cover-btn {
+.cover-btn,
+.page .cover-btn {
+  min-height: 0;
   border: none;
   padding: 0;
   background: none;
@@ -2335,7 +2343,8 @@ kbd {
   aspect-ratio: 3 / 2;
 }
 
-.cover-btn.empty {
+.cover-btn.empty,
+.page .cover-btn.empty {
   display: grid;
   place-content: center;
   justify-items: center;
@@ -2967,8 +2976,7 @@ kbd {
   padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
   padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
   padding-top: env(safe-area-inset-top, 0px);
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--bg);
 }
 
 .reader-body {

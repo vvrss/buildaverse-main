@@ -145,7 +145,7 @@ export function Welcome() {
         <div class="mini-narration">The knocking stopped.</div>
       </div>
       <h1 class="display hero-title">Storyteller</h1>
-      <p class="lead">Write stories as conversations, quickly, on any device.</p>
+      <p class="welcome-lead">Write stories as conversations, quickly, on any device.</p>
       <ul class="features">
         <li>
           <Shuffle size={20} />
